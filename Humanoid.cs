@@ -37,57 +37,66 @@ public class Humanoid : MonoBehaviour
      /* Serialized Internal properties */
     #region SerializedReferences
 
-    /* max references */
-    [SerializeField] private float maxHealth = 100;
-    [SerializeField] private float maxWalkSpeed = 12;
-    [SerializeField] private float maxRunningSpeed = 18;
-    [SerializeField] private float maxJumpPower = 15;
-    [SerializeField] private float maxStamina = 200;
-    
-    /* humanoid states*/
-    /* for stateType, I won't make it serialized, it's belonging to this class action. */
+    [Header("References")]
+    [SerializeField] private Rigidbody rigidBody;
+    [SerializeField] private Transform rootPart;
+    [SerializeField] private Collider bodyCollider;
+
+    [Header("Owner")]
     [SerializeField] private HumanoidOwnerType ownerType = HumanoidOwnerType.Neutral;
 
-    /* physics */
-    [SerializeField] private Rigidbody rigidBody;
+    [Header("Physics Informations")]
     [SerializeField] private Vector3 linearVelocity = Vector3.zero;
     [SerializeField] private Vector3 angularVelocity = Vector3.zero;
     [SerializeField] private Vector3 lastMoveDirection = Vector3.forward;
     [SerializeField] private Vector3 facingDirection = Vector3.forward;
-    [SerializeField] private Transform rootPart;
-    [SerializeField] private Collider bodyCollider;
+
+    [Header("Physics")]
     [SerializeField] private float airControl = 0.45f;
     [SerializeField] private float maxSlopeAngle = 45.0f;
-    [SerializeField] private float walkToStoppingDistance = 0.5f;
-    [SerializeField] private Vector3 groundNormal = Vector3.up;
-    [SerializeField] private Vector3 cameraOffset = Vector3.zero;
-    [SerializeField] private float toGroundHeight = 1.5f;
-    [SerializeField] private float safeFromFallDistance = 3.5f;
-    [SerializeField] private float fallDamageMultiplier = 10.0f; 
-
-    /* booleans */
     [SerializeField] private bool platformStanding = false;
+
+    [Header("Details")]
+    [SerializeField] private bool canApplyFallDamage = true;
+    [SerializeField] private float safeFromFallDistance = 3.5f;
+    [SerializeField] private float fallDamageMultiplier = 10.0f;
+    [SerializeField] private float walkToStoppingDistance = 0.5f;
+    [SerializeField] private float toGroundHeight = 1.5f;
+
+    [SerializeField] private Vector3 cameraOffset = Vector3.zero;
     [SerializeField] private bool canMove = true;
     [SerializeField] private bool canJump = true;
     [SerializeField] private bool autoRotate = true;
-    [SerializeField] private bool healthRegenerationEnabled = true;
-    [SerializeField] private bool staminaRegenerationEnabled = true;
-    [SerializeField] private bool canApplyFallDamage = true;
 
-    /* references */
+    [Header("Max Attributes")]
+    [SerializeField] private float maxHealth = 100;
+    [SerializeField] private float maxWalkSpeed = 12;
+    [SerializeField] private float maxRunningSpeed = 18;
+    [SerializeField] private float maxJumpPower = 15;
+    [SerializeField] private float maxStamina = 200;   
+
+    /* booleans */
+    [Header("More")]
+    [SerializeField] private float staminaDecrementAmount = 2.0f;
+    [SerializeField] private float staminaDecrementTick = 0.2f;
+
+    [SerializeField] private bool healthRegenerationEnabled = true;
+    [SerializeField] private float healthRegenerationAmount = 1.0f;
+    [SerializeField] private float healthRegenerationTick = 0.8f;
+    [SerializeField] private float healthRegenerationDelay = 3.0f;
+
+    [SerializeField] private bool staminaRegenerationEnabled = true;
+    [SerializeField] private float staminaRegenerationAmount = 5.0f;
+    [SerializeField] private float staminaRegenerationTick = 0.75f;
+    [SerializeField] private float staminaRegenerationDelay = 2.0f;
+
+    [Header("Attributes")]
     [SerializeField] private float health;
     [SerializeField] private float walkSpeed;
     [SerializeField] private float runningSpeed;
     [SerializeField] private float jumpPower;
     [SerializeField] private float stamina;
-    [SerializeField] private float staminaDecrementAmount = 2.0f;
-    [SerializeField] private float staminaDecrementTick = 0.2f;
-    [SerializeField] private float healthRegenerationAmount = 1.0f;
-    [SerializeField] private float healthRegenerationTick = 0.8f;
-    [SerializeField] private float healthRegenerationDelay = 3.0f;
-    [SerializeField] private float staminaRegenerationAmount = 5.0f;
-    [SerializeField] private float staminaRegenerationTick = 0.75f;
-    [SerializeField] private float staminaRegenerationDelay = 2.0f;
+    [SerializeField] private Vector3 groundNormal;
 
     #endregion
 
@@ -183,7 +192,7 @@ public class Humanoid : MonoBehaviour
     public float StaminaRegenerationTick => staminaRegenerationTick;
     public float StaminaRegenerationDelay => staminaRegenerationDelay;
     public Vector3 CameraOffset => cameraOffset;
-
+    
     /* booleans */
     public bool IsAlive => isAlive;
     public bool IsGrounded => isGrounded;
@@ -196,6 +205,7 @@ public class Humanoid : MonoBehaviour
     public bool CanApplyFallDamage => canApplyFallDamage;
     public bool HealthRegenerationEnabled => healthRegenerationEnabled;
     public bool StaminaRegenerationEnabled => staminaRegenerationEnabled;
+    public bool HasTargetPoint => hasTargetPoint;
 
     #endregion
 
@@ -316,7 +326,7 @@ public class Humanoid : MonoBehaviour
         staminaRegenTimer += Time.deltaTime;
         if (staminaRegenTimer >= staminaRegenerationTick)
         {
-            SetHumanoidStamina(stamina + staminaDecrementAmount);
+            SetHumanoidStamina(stamina + staminaRegenerationAmount);
             staminaRegenTimer = 0;
         }
     }
@@ -435,12 +445,10 @@ public class Humanoid : MonoBehaviour
     // Giving some health to Humanoid
     public void Heal(float amount)
     {
-        if (!isAlive)
+        if (!isAlive || amount <= 0f)
             return;
 
-        float oldHealth = health;
-        
-        amount = Mathf.Max(1, amount);
+        float oldHealth = health;        
         SetHumanoidHealth(amount + health);
 
         float healedHealth = health - oldHealth;
@@ -488,6 +496,48 @@ public class Humanoid : MonoBehaviour
 
         ChangeState(HumanoidStateType.Died);
         Died?.Invoke();
+    }
+
+    public bool MoveTo(Vector3 Location)
+    {
+        return MoveTo(Location, false);
+    }
+
+    public bool MoveTo(Vector3 Location, bool Running)
+    {
+        if (!CanMove)
+            return false;
+
+        SetHumanoidTargetPoint(Location);
+
+        Vector3 distance = Location - rootPart.position;
+        distance.y = 0;
+
+        float stoppingDistance2 = walkToStoppingDistance * walkToStoppingDistance;
+
+        if (distance.sqrMagnitude <= stoppingDistance2)
+        {
+            ClearHumanoidTargetPoint();
+            StopMovement();
+
+            return true;
+        }
+
+        Move(distance.normalized, Running);
+        return true;
+    }
+
+    public void StopMovement()
+    {
+        Vector3 velocity = rigidBody.linearVelocity;
+        velocity.x = 0; velocity.z = 0;
+
+        rigidBody.linearVelocity = velocity;
+
+        moveDirection = Vector3.zero;
+        isMoving = false;
+
+        ChangeState(HumanoidStateType.Idle);
     }
 
     /* setters */
@@ -555,7 +605,7 @@ public class Humanoid : MonoBehaviour
     public void SetHumanoidStaminaDecrementAmount(float amount)
     {
         float oldStaminaDecAmount = staminaDecrementAmount;
-        staminaDecrementAmount = Mathf.Clamp(amount, 0, stamina);
+        staminaDecrementAmount = Mathf.Max(amount, 0);
 
         if (oldStaminaDecAmount != staminaDecrementAmount)
             OnStaminaDecrementAmountChanged?.Invoke(oldStaminaDecAmount, staminaDecrementAmount);
@@ -704,7 +754,7 @@ public class Humanoid : MonoBehaviour
     // Comparing a state that enabled in this Humanoid
     public bool IsStateEnabled(HumanoidStateType state)
     {
-        return (!disableStates.Contains(state));
+        return !disableStates.Contains(state);
     }
 
     public void ChangeOwner(HumanoidOwnerType newType)
@@ -740,7 +790,7 @@ public class Humanoid : MonoBehaviour
 
     public void UnlockJump()
     {
-        jumpLockCount = Mathf.Max(0, movementLockCount - 1);
+        jumpLockCount = Mathf.Max(0, jumpLockCount - 1);
     }
 
     /* max properties */
@@ -829,7 +879,7 @@ public class Humanoid : MonoBehaviour
     public void SetHumanoidWalkToStoppingDistance(float amount)
     {
         float old = walkToStoppingDistance;
-        walkToStoppingDistance = amount;
+        walkToStoppingDistance = Mathf.Max(0, amount);
 
         if (!old.Equals(walkToStoppingDistance))
             OnWalkToStoppingDistanceChanged?.Invoke(old, walkToStoppingDistance);
@@ -846,7 +896,7 @@ public class Humanoid : MonoBehaviour
     public void SetHumanoidAirControl(float amount)
     {
         float old = airControl;
-        airControl = Mathf.Max(amount, 1.0f);
+        airControl = Mathf.Clamp01(amount);
 
         if (old != airControl)
             OnAirControlChanged?.Invoke(old, airControl);
@@ -876,7 +926,7 @@ public class Humanoid : MonoBehaviour
     public void SetHumanoidMaxSlopeAngle(float amount)
     {
         float old = maxSlopeAngle;
-        maxSlopeAngle = amount;
+        maxSlopeAngle = Mathf.Clamp(amount, 0, 89);
 
         if (old != maxSlopeAngle)
             OnMaxSlopeAngleChanged?.Invoke(old, maxSlopeAngle);
@@ -1034,7 +1084,7 @@ public class Humanoid : MonoBehaviour
     #region API
     public void Move(Vector3 Direction, bool Running)
     {
-        if (!isAlive || !canMove || platformStanding)
+        if (!CanMove)
             return;
         
         if (Direction.sqrMagnitude <= 0.001f)
@@ -1047,8 +1097,10 @@ public class Humanoid : MonoBehaviour
 
         Direction.Normalize();
 
+        bool canRun = Running && stamina > 0;
+
         float control = isGrounded ? 1f : airControl;
-        float speed = (Running && stamina > 0) ? runningSpeed : walkSpeed;
+        float speed = canRun ? runningSpeed : walkSpeed;
         Vector3 velocity = Direction * speed * control;
 
         velocity.y = rigidBody.linearVelocity.y;
@@ -1069,8 +1121,8 @@ public class Humanoid : MonoBehaviour
             moveDirection = Vector3.zero;
         }
 
-        ChangeState(Running ? HumanoidStateType.Running : HumanoidStateType.Walking);
-        if (Running)
+        ChangeState(canRun ? HumanoidStateType.Running : HumanoidStateType.Walking);
+        if (canRun)
         {
             staminaUsedTimer += Time.deltaTime;
 
@@ -1092,7 +1144,7 @@ public class Humanoid : MonoBehaviour
 
     public void Jump()
     {
-        if (!isAlive || !isGrounded || !canJump || platformStanding)
+        if (!isGrounded || !CanJump)
             return;
 
         isJumping = true;
@@ -1133,14 +1185,14 @@ public class Humanoid : MonoBehaviour
         if (rootPart == null) rootPart = transform;
         if (bodyCollider == null) bodyCollider = GetComponent<Collider>(); 
 
-        isAlive = health > 0;
-        isMoving = moveDirection.sqrMagnitude > 0.001f;
-
         health = maxHealth;
         walkSpeed = maxWalkSpeed;
         runningSpeed = maxRunningSpeed;
         jumpPower = maxJumpPower;
         stamina = maxStamina;
+
+        isAlive = health > 0;
+        isMoving = moveDirection.sqrMagnitude > 0.001f;
 
         lastStaminaUseTime = 0;
     }
