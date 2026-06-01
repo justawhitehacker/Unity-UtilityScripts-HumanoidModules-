@@ -1,14 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.Specialized;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices.WindowsRuntime;
-using System.Security.Cryptography;
-using TMPro;
-using Unity.VisualScripting;
-using UnityEditor;
-using UnityEditor.Analytics;
-using UnityEditor.Search;
 using UnityEngine;
 
 [Serializable] public enum HumanoidStateType { 
@@ -22,12 +13,27 @@ using UnityEngine;
     Neutral };
 [Serializable] public enum HumanoidOwnerType { Player, AI, Neutral };
 
-[Serializable] [RequireComponent(typeof(Rigidbody))]
+[Serializable]
+public struct HumanoidDamageInfo
+{
+    public float Amount;
+    public GameObject Attacker;
+    public Vector3 HitPoint;
+    public Vector3 KnockbackDistance;
+    public string DamageType;
+    public float CrowdControlDuration;
+    
+    public bool IgnoreDefense;
+    public bool KnockedBack;
+    public bool CrowdControl;
+};
+
+[Serializable] [RequireComponent(typeof(Rigidbody))] [RequireComponent(typeof(Collider))]
 public class Humanoid : MonoBehaviour 
 { 
     /* Player's properties for humanoid, such as Health, MaxHealth, WalkSpeed, etc.                     *
      * I'll make them all as public variables, because those properties are readable to other classes. */    
-
+    
      /* Serialized Internal properties */
     #region SerializedReferences
 
@@ -50,20 +56,23 @@ public class Humanoid : MonoBehaviour
     [SerializeField] private Vector3 facingDirection = Vector3.forward;
     [SerializeField] private Transform rootPart;
     [SerializeField] private Collider bodyCollider;
+    [SerializeField] private float airControl = 0.45f;
     [SerializeField] private float maxSlopeAngle = 45.0f;
     [SerializeField] private float walkToStoppingDistance = 0.5f;
     [SerializeField] private Vector3 groundNormal = Vector3.up;
     [SerializeField] private Vector3 cameraOffset = Vector3.zero;
     [SerializeField] private float toGroundHeight = 1.5f;
+    [SerializeField] private float safeFromFallDistance = 3.5f;
+    [SerializeField] private float fallDamageMultiplier = 10.0f; 
 
-    
     /* booleans */
-    [SerializeField] private bool platformStanding;
+    [SerializeField] private bool platformStanding = false;
     [SerializeField] private bool canMove = true;
     [SerializeField] private bool canJump = true;
     [SerializeField] private bool autoRotate = true;
     [SerializeField] private bool healthRegenerationEnabled = true;
     [SerializeField] private bool staminaRegenerationEnabled = true;
+    [SerializeField] private bool canApplyFallDamage = true;
 
     /* references */
     [SerializeField] private float health;
@@ -87,8 +96,13 @@ public class Humanoid : MonoBehaviour
     /* booleans */
     private bool isAlive;
     private bool isGrounded;
+    private bool isMoving;
+    private float fallDistance;
     private bool isJumping = false;
-    private bool hasTargetPoint;
+    private bool hasTargetPoint = false;
+
+    /* ai helpers */
+    private Vector3 targetPoint;
 
     /* owner type */
     private HumanoidStateType stateType = HumanoidStateType.Neutral;
@@ -96,9 +110,7 @@ public class Humanoid : MonoBehaviour
     /* physics */
     private Collider floorCollider;
     private PhysicsMaterial floorMaterial;
-    private Vector3 targetPoint;
     private float fallStartY;
-    private float fallDistance;
     private Vector3 moveDirection;
 
     #endregion
@@ -107,8 +119,12 @@ public class Humanoid : MonoBehaviour
     /* timers */
     private float lastStaminaUseTime;
     private float staminaRegenTimer;
+    private float staminaUsedTimer;
     private float lastDamagedTime;
     private float healthRegenTimer;
+
+    private int movementLockCount;
+    private int jumpLockCount;
 
     private float EPS_TIMER = 0.05f;
     #endregion
@@ -131,13 +147,12 @@ public class Humanoid : MonoBehaviour
     public float VerticalVelocity => linearVelocity.y;
     public float HorizontalSpeed { get { Vector3 vc = linearVelocity; vc.y = 0; return vc.magnitude; } }
     public Vector3 MoveDirection => moveDirection;
-    public Vector3 GlobalMoveDirection => moveDirection;
-    public Vector3 LocalMoveDirection { get { return transform.InverseTransformDirection(moveDirection); } }
     public Vector3 LastMoveDirection => lastMoveDirection;
     public Vector3 FacingDirection => facingDirection;
     public Rigidbody RigidBody => rigidBody;
     public Transform RootPart => rootPart;
     public Collider BodyCollider => bodyCollider;
+    public float AirControl => airControl;
     public float MaxSlopeAngle => maxSlopeAngle;
     public float WalkToStoppingDistance => walkToStoppingDistance;
     public Vector3 GroundNormal => groundNormal;
@@ -146,7 +161,11 @@ public class Humanoid : MonoBehaviour
     public Vector3 TargetPoint => targetPoint;
     public float FallStartY => fallStartY;
     public float FallDistance => fallDistance;
+    public float SafeFromFallDistance => safeFromFallDistance;
+    public float FallDamageMultiplier => fallDamageMultiplier;
     public float ToGroundHeight => toGroundHeight;
+    public bool IsOnSlope => Vector3.Angle(groundNormal, Vector3.up) > 1f;
+    public float CurrentSlopeAngle => Vector3.Angle(groundNormal, Vector3.up);
 
     /* References [References = MaxReferences]                         *
      * If [References > MaxReferences] then References = MaxReferences */
@@ -168,12 +187,13 @@ public class Humanoid : MonoBehaviour
     /* booleans */
     public bool IsAlive => isAlive;
     public bool IsGrounded => isGrounded;
+    public bool IsMoving => isMoving;
     public bool PlatformStanding => platformStanding;
-    public bool CanMove => canMove;
-    public bool CanJump => canJump;
+    public bool CanMove => canMove && !platformStanding && isAlive && movementLockCount <= 0;
+    public bool CanJump => canJump && !platformStanding && isAlive && jumpLockCount <= 0;
     public bool AutoRotate => autoRotate;
     public bool IsJumping => isJumping;
-    public bool HasTargetPoint => hasTargetPoint;
+    public bool CanApplyFallDamage => canApplyFallDamage;
     public bool HealthRegenerationEnabled => healthRegenerationEnabled;
     public bool StaminaRegenerationEnabled => staminaRegenerationEnabled;
 
@@ -187,15 +207,37 @@ public class Humanoid : MonoBehaviour
     /* Callbacks */
     public event Action Died;
     public event Action Grounded;
+    public event Action Landed;
+    public event Action Revived;
+
     public event Action OnJumping;
     public event Action OnRunning;
     public event Action OnWalking;
-    public event Action OnFlying;
-    public event Action<float> Damaged;
+    public event Action OnAirborne;
+    public event Action OnAirborneBegin;
+    public event Action OnHealthRegenerationEnabledChanged;
+    public event Action OnStaminaRegenerationEnabledChanged;
 
-    /* Events */
+    public event Action<float> Damaged;
+    public event Action<float> Healed;
+
+    public event Action<string> OnStatusAdded;
+    public event Action<string> OnStatusRemoved;
+    public event Action<string, string> OnStatusChanged;
+    public event Action<string, float> OnTemporaryStatusAddedOrChanged;
+    public event Action<string> OnTemporaryStatusExpired;
+    public event Action<string> OnTemporaryStatusRemoved;
+
     public event Action<float, float> OnHealthChanged;
     public event Action<float, float> OnStaminaChanged;
+    public event Action<float, float> OnWalkSpeedChanged;
+    public event Action<float, float> OnRunningSpeedChanged;
+    public event Action<float, float> OnJumpPowerChanged;
+    public event Action<float, float> OnMaxHealthChanged;
+    public event Action<float, float> OnMaxStaminaChanged;
+    public event Action<float, float> OnMaxWalkSpeedChanged;
+    public event Action<float, float> OnMaxRunningSpeedChanged;
+    public event Action<float, float> OnMaxJumpPowerChanged;
     public event Action<float, float> OnStaminaDecrementAmountChanged;
     public event Action<float, float> OnStaminaDecrementTickChanged;
     public event Action<float, float> OnHealthRegenerationAmountChanged;
@@ -204,20 +246,33 @@ public class Humanoid : MonoBehaviour
     public event Action<float, float> OnStaminaRegenerationAmountChanged;
     public event Action<float, float> OnStaminaRegenerationTickChanged;
     public event Action<float, float> OnStaminaRegenerationDelayChanged;
-    public event Action OnHealthRegenerationEnabledChanged;
-    public event Action OnStaminaRegenerationEnabledChanged;
-    public event Action<float, float> OnWalkSpeedChanged;
-    public event Action<float, float> OnRunningSpeedChanged;
-    public event Action<float, float> OnJumpPowerChanged;
+    public event Action<float, float> OnAirControlChanged;
+    public event Action<float, float> OnMaxSlopeAngleChanged;
+    public event Action<float, float> OnSafeFromFallDistance;
+    public event Action<float, float> OnFallDamageMultiplierChanged;
+    public event Action<float, float> OnWalkToStoppingDistanceChanged;
+
     public event Action<Vector3, Vector3> OnCameraOffsetChanged;
+
     public event Action<HumanoidStateType, HumanoidStateType> OnStateChanged;
     public event Action<HumanoidOwnerType, HumanoidOwnerType> OnOwnerChanged;
+
+    public event Action<bool, bool> OnAutoRotateChanged;
+    public event Action<bool, bool> OnCanApplyFallDamageChanged;
+    public event Action<bool, bool> OnPlatformStandingChanged;
+    public event Action<bool, bool> OnCanMoveChanged;
+    public event Action<bool, bool> OnCanJumpChanged;
+
     #endregion
 
     #region Tables
-    private readonly Dictionary<KeyCode, Action> actions = new();
+    /* hash tables */
     private readonly HashSet<string> statuses = new();
+    private readonly HashSet<string> expiredStatuses = new();
     private readonly HashSet<HumanoidStateType> disableStates = new();
+
+    /* dictionaries */
+    private readonly Dictionary<string, float> temporaryStatuses = new();
     #endregion
 
     #region Helpers
@@ -244,6 +299,28 @@ public class Humanoid : MonoBehaviour
         }
     }
 
+    private void HandleStaminaRegeneration()
+    {
+        if (!staminaRegenerationEnabled || !isAlive)
+            return;
+
+        if (Time.time - lastStaminaUseTime <= staminaRegenerationDelay)
+            return;
+
+        if (stamina >= maxStamina)
+        {
+            stamina = maxStamina;   
+            return;
+        }
+
+        staminaRegenTimer += Time.deltaTime;
+        if (staminaRegenTimer >= staminaRegenerationTick)
+        {
+            SetHumanoidStamina(stamina + staminaDecrementAmount);
+            staminaRegenTimer = 0;
+        }
+    }
+
     private void HandleFallTracking()
     {
         if (!isGrounded && linearVelocity.y < 0)
@@ -254,34 +331,79 @@ public class Humanoid : MonoBehaviour
                 ChangeState(HumanoidStateType.Airborne);
 
                 isGrounded = false;
+                OnAirborneBegin?.Invoke();
             }
             fallDistance = fallStartY - rootPart.position.y;
+            OnAirborne?.Invoke();
         }
 
         if (isGrounded && stateType == HumanoidStateType.Airborne)
         {
+            ApplyFallDamage();
+
             ChangeState(HumanoidStateType.Grounded);
             isGrounded = true;
+
+            Landed?.Invoke();
         }
     }
-
-    private void StopMovement()
-    {
-        canMove = false;
-        canJump = false;
-    }
-
+    
     private void HandleFloorInfo()
     {
+        bool oldGrounded = isGrounded;
+
         if (Physics.Raycast(rootPart.position, Vector3.down, out RaycastHit info, toGroundHeight))
         {
             floorCollider = info.collider;
             floorMaterial = info.collider.sharedMaterial;
+            groundNormal = info.normal;
+            
+            float slopeAngle = Vector3.Angle(info.normal, Vector3.up);
+            isGrounded = slopeAngle <= maxSlopeAngle;
         }
         else
         {
             floorCollider = null;
             floorMaterial = null;
+            groundNormal = Vector3.up;
+
+            isGrounded = false;
+        }
+
+        if (!oldGrounded && isGrounded)
+        {
+            isJumping = false;
+            Grounded?.Invoke();
+        }
+    }
+
+    private void ApplyFallDamage()
+    {
+        if (!canApplyFallDamage || !isAlive)
+            return;
+        
+        if (safeFromFallDistance >= fallDistance)
+            return;
+
+        float totalDamage = (fallDistance - safeFromFallDistance) * fallDamageMultiplier;
+        TakeDamage(totalDamage);
+    }
+
+    private void HandleTemporaryStatus()
+    {
+        // clear the hash tables of expires statuses
+        expiredStatuses.Clear();
+
+        foreach (var status in temporaryStatuses)
+        {
+            if (Time.time > status.Value)
+                expiredStatuses.Add(status.Key);
+        }
+
+        foreach (string status in expiredStatuses)
+        {
+            temporaryStatuses.Remove(status);
+            OnTemporaryStatusExpired?.Invoke(status);
         }
     }
     #endregion
@@ -290,7 +412,7 @@ public class Humanoid : MonoBehaviour
     /* Methods functions */
 
     // Giving damage to Humanoid, by decreasing the health of the humanoid
-    public void GiveDamage(float amount)
+    public void TakeDamage(float amount)
     {
         // Checking the value of "damageSize"
         if (amount <= 0)
@@ -310,6 +432,46 @@ public class Humanoid : MonoBehaviour
         lastDamagedTime = Time.time;
     }
 
+    // Giving some health to Humanoid
+    public void Heal(float amount)
+    {
+        if (!isAlive)
+            return;
+
+        float oldHealth = health;
+        
+        amount = Mathf.Max(1, amount);
+        SetHumanoidHealth(amount + health);
+
+        float healedHealth = health - oldHealth;
+        if (healedHealth > 0)
+            Healed?.Invoke(healedHealth);
+    }
+
+    // Calling-back or Revive Humanoid to the world, with gaining some reviveHealthAmount
+    public void Revive(float reviveHealthAmount)
+    {
+        if (isAlive)
+            return;
+
+        isAlive = true;
+        SetHumanoidHealth(Mathf.Clamp(reviveHealthAmount, 1, maxHealth));
+        ChangeState(HumanoidStateType.Idle);
+
+        Revived?.Invoke();
+    }
+
+    // Comparing to current stamina and the decrement amount, in order to decrease the current stamina of Humanoid
+    public bool TryUsingStamina(float amount)
+    {
+        if (amount > stamina)
+            return false;
+
+        SetHumanoidStamina(stamina - amount);
+        lastStaminaUseTime = Time.time;
+        return true;
+    }
+
      // Set Humanoid's health to 0
     public void Kill()
     {   
@@ -327,6 +489,8 @@ public class Humanoid : MonoBehaviour
         ChangeState(HumanoidStateType.Died);
         Died?.Invoke();
     }
+
+    /* setters */
 
     // Set Humanoid's health in amount, up to the MaxHealth
     public void SetHumanoidHealth(float amount)
@@ -411,7 +575,7 @@ public class Humanoid : MonoBehaviour
     public void SetHumanoidHealthRegenerationAmount(float amount)
     {
         float old = healthRegenerationAmount;
-        healthRegenerationAmount = Mathf.Max(amount, health);
+        healthRegenerationAmount = Mathf.Max(0, amount);
 
         if (old != healthRegenerationAmount)
             OnHealthRegenerationAmountChanged?.Invoke(old, healthRegenerationAmount);
@@ -441,7 +605,7 @@ public class Humanoid : MonoBehaviour
     public void SetHumanoidStaminaRegenerationAmount(float amount)
     {
         float old = staminaRegenerationAmount;
-        staminaRegenerationAmount = Mathf.Max(amount, stamina);
+        staminaRegenerationAmount = Mathf.Max(0, amount);
 
         if (old != staminaRegenerationAmount)
             OnStaminaRegenerationAmountChanged?.Invoke(old, staminaRegenerationAmount);
@@ -454,7 +618,7 @@ public class Humanoid : MonoBehaviour
         staminaRegenerationTick = Mathf.Max(amount, EPS_TIMER);
 
         if (old != staminaRegenerationTick)
-            OnHealthRegenerationTickChanged?.Invoke(old, staminaRegenerationTick);
+            OnStaminaRegenerationTickChanged?.Invoke(old, staminaRegenerationTick);
     }
 
     // Set Humanoid's stamina regeneration delay
@@ -464,7 +628,7 @@ public class Humanoid : MonoBehaviour
         staminaRegenerationDelay = Mathf.Max(amount, EPS_TIMER);
 
         if (old != staminaRegenerationDelay)
-            OnHealthRegenerationTickChanged?.Invoke(old, staminaRegenerationDelay);
+            OnStaminaRegenerationDelayChanged?.Invoke(old, staminaRegenerationDelay);
     }
 
     // Set Humanoid's health regeneration permission
@@ -493,22 +657,8 @@ public class Humanoid : MonoBehaviour
         Vector3 old = cameraOffset;
         cameraOffset = offset;
 
-        if (!(old.x.Equals(cameraOffset.x) || old.y.Equals(cameraOffset.y) || old.z.Equals(cameraOffset.z)))
+        if (old != offset)
             OnCameraOffsetChanged?.Invoke(old, cameraOffset);
-    }
-
-    // Set Humanoid's target point helper to a new point
-    public void SetHumanoidTargetPoint(Vector3 point)
-    {
-        targetPoint = point;
-        hasTargetPoint = true;
-    }
-
-    // Set Humanoid's target point to zero vector but killed the target point boolean info
-    public void ClearHumanoidTargetPoint()
-    {
-        targetPoint = Vector3.zero;
-        hasTargetPoint = false;
     }
 
     // Change Humanoid's state type to newer state
@@ -522,6 +672,24 @@ public class Humanoid : MonoBehaviour
 
         if (oldState != stateType)
             OnStateChanged?.Invoke(oldState, stateType);
+    }
+
+    // Adding a force to rigidbody of Humanoid
+    public void AddForce(Vector3 direction)
+    {
+        if (!isAlive)
+            return;
+        
+        rigidBody.AddForce(direction);
+    }
+
+    // Overload: Adding a force with desired foce mode to rigidbody of Humanoid
+    public void AddForce(Vector3 direction, ForceMode forceMode)
+    {
+        if (!isAlive)
+            return;
+
+        rigidBody.AddForce(direction, forceMode);    
     }
 
     // Change Humanoid's state to become enabled or disabled
@@ -554,56 +722,241 @@ public class Humanoid : MonoBehaviour
         return stateType == type;
     }
 
+    
+    public void LockMovement()
+    {
+        movementLockCount++;
+    }
+
+    public void UnlockMovement()
+    {
+        movementLockCount = Mathf.Max(0, movementLockCount - 1);
+    }
+
+    public void LockJump()
+    {
+        jumpLockCount++;
+    }
+
+    public void UnlockJump()
+    {
+        jumpLockCount = Mathf.Max(0, movementLockCount - 1);
+    }
+
     /* max properties */
 
     // Set Humanoid's max health
     public void SetHumanoidMaxHealth(float amount)
     {
+        float old = maxHealth;
+
         maxHealth = Mathf.Max(1, amount);
         SetHumanoidHealth(Mathf.Min(health, maxHealth));
+
+        if (old != maxHealth)
+            OnMaxHealthChanged?.Invoke(old, maxHealth);
     }
 
     // Set Humanoid's max walk speed
     public void SetHumanoidMaxWalkSpeed(float amount)
     {
+        float old = maxWalkSpeed;
+
         maxWalkSpeed = Mathf.Max(1, amount);
         SetHumanoidWalkSpeed(Mathf.Min(walkSpeed, maxWalkSpeed));
+
+        if (old != maxWalkSpeed)
+            OnMaxWalkSpeedChanged?.Invoke(old, maxWalkSpeed);
     }
 
     // Set Humanoid's max running speed
     public void SetHumanoidMaxRunningSpeed(float amount)
     {
+        float old = maxRunningSpeed;
+
         maxRunningSpeed = Mathf.Max(1, amount);
         SetHumanoidRunningSpeed(Mathf.Min(runningSpeed, maxRunningSpeed));
+
+        if (old != maxRunningSpeed)
+            OnMaxRunningSpeedChanged?.Invoke(old, maxRunningSpeed);
     }
 
     // Set Humanoid's max jump power
     public void SetHumanoidMaxJumpPower(float amount)
     {
+        float old = maxJumpPower;
+
         maxJumpPower = Mathf.Max(1, amount);
         SetHumanoidJumpPower(Mathf.Min(jumpPower, maxJumpPower));
+
+        if (old != maxJumpPower)
+            OnMaxJumpPowerChanged?.Invoke(old, maxJumpPower);
     }
 
     // Set Humanoid's max stamina
     public void SetHumanoidMaxStamina(float amount)
     {
+        float old = maxStamina;
+
         maxStamina = Mathf.Max(1, amount);
         SetHumanoidStamina(Mathf.Min(stamina, maxStamina));
+
+        if (old != maxStamina)
+            OnMaxStaminaChanged?.Invoke(old, maxStamina);
+    }
+
+    // Set Humanoid's can move
+    public void SetHumanoidCanMove(bool enable)
+    {
+        bool old = canMove;
+        canMove = enable;
+
+        if (old != canMove)
+            OnCanMoveChanged?.Invoke(old, enable);
+    }
+
+    // Set Humanoid's can jump
+    public void SetHumanoidCanJump(bool enable)
+    {
+        bool old = canJump;
+        canJump = enable;
+
+        if (old != canJump)
+            OnCanJumpChanged?.Invoke(old, enable);
+    }
+
+    // Set Humanoid's walk to stopping distance
+    public void SetHumanoidWalkToStoppingDistance(float amount)
+    {
+        float old = walkToStoppingDistance;
+        walkToStoppingDistance = amount;
+
+        if (!old.Equals(walkToStoppingDistance))
+            OnWalkToStoppingDistanceChanged?.Invoke(old, walkToStoppingDistance);
+    }
+
+    // Set Humanoid's ground height
+    public void SetHumanoidToGroundHeight(float amount)
+    {
+        amount = Mathf.Max(0, amount);
+        toGroundHeight = amount;
+    }
+
+    // Set Humanoid's air control
+    public void SetHumanoidAirControl(float amount)
+    {
+        float old = airControl;
+        airControl = Mathf.Max(amount, 1.0f);
+
+        if (old != airControl)
+            OnAirControlChanged?.Invoke(old, airControl);
+    }
+
+    // Set Humanoid's auto rotate
+    public void SetHumanoidAutoRotate(bool enable)
+    {
+        bool old = autoRotate;
+        autoRotate = enable;
+
+        if (old != autoRotate)
+            OnAutoRotateChanged?.Invoke(old, autoRotate);
+    }
+
+    // Set Humanoid's can apply fall damage
+    public void SetHumanoidCanApplyFallDamage(bool enable)
+    {
+        bool old = canApplyFallDamage;
+        canApplyFallDamage = enable;
+
+        if (old != canApplyFallDamage)
+            OnCanApplyFallDamageChanged?.Invoke(old, canApplyFallDamage);
+    }
+
+    // Set Humanoid's max slope angle
+    public void SetHumanoidMaxSlopeAngle(float amount)
+    {
+        float old = maxSlopeAngle;
+        maxSlopeAngle = amount;
+
+        if (old != maxSlopeAngle)
+            OnMaxSlopeAngleChanged?.Invoke(old, maxSlopeAngle);
+    }
+
+    // Set Humanoid's platform standing
+    public void SetHumanoidPlatformStanding(bool enable)
+    {
+        bool old = platformStanding;
+        platformStanding = enable;
+
+        if (old != platformStanding)
+            OnPlatformStandingChanged?.Invoke(old, platformStanding);
+    }
+
+    // Set Humanoid's safe from fall damage distance
+    public void SetHumanoidSafeFromFallDistance(float amount)
+    {
+        float old = safeFromFallDistance;
+        safeFromFallDistance = Mathf.Max(0, amount);
+
+        if (old != safeFromFallDistance)
+            OnSafeFromFallDistance?.Invoke(old, safeFromFallDistance);
+    }
+
+    // Set Humanoid's fall damage multiplier
+    public void SetHumanoidFallDamageMultiplier(float amount)
+    {
+        float old = fallDamageMultiplier;
+        fallDamageMultiplier = Mathf.Max(1, amount);
+
+        if (old != fallDamageMultiplier)
+            OnFallDamageMultiplierChanged?.Invoke(old, fallDamageMultiplier);
+    }
+
+    // Set Humanoid's target point
+    public void SetHumanoidTargetPoint(Vector3 point)
+    {
+        targetPoint = point;
+        hasTargetPoint = true;
+    }
+
+    // Clearing Humanoid's target point
+    public void ClearHumanoidTargetPoint()
+    {
+        hasTargetPoint = false;
+    }
+
+    /* getters */
+    // Get Humanoid's move direction in local/relative space of this transform
+    public Vector3 GetLocalMoveDirection()
+    {
+        return transform.InverseTransformDirection(moveDirection);
+    }
+
+    // Get Humanoid's move direction in world space
+    public Vector3 GetGlobalMoveDirection()
+    {
+        return moveDirection;
+    }
+
+    // Get Humanoid's facing direction in world space
+    public Vector3 GetFacingDirection()
+    {
+        return facingDirection;
+    }
+
+    // Get amount between [1, -1] of forward movement direction from Humanoid
+    public float GetForwardAmount()
+    {
+        return Vector3.Dot(transform.forward, moveDirection);
+    }
+
+    // Get amount between [1, -1] of right movement direction from Humanoid
+    public float GetRightAmount()
+    {
+        return Vector3.Dot(transform.right, moveDirection);
     }
 
     /* extra methods */
-
-    // add an action with keycode to execute the function
-    public void BindAction(KeyCode keyCode, Action func)
-    {
-        if (func == null)
-            return;
-
-        if (actions.ContainsKey(keyCode))
-            return;
-        
-        actions.Add(keyCode, func);
-    }
 
     // return the bool states by comparing the current status with desired status 
     public bool HasStatus(string statusName)
@@ -611,18 +964,58 @@ public class Humanoid : MonoBehaviour
         return statuses.Contains(statusName);
     }
 
+    // return all statuses of Humanoid that still remaining
+    public List<string> GetStatuses()
+    {
+        return new(statuses);
+    }
+
+    // return the bool states by comparing the current temporary status with desired status
+    public bool HasTemporaryStatus(string statusName)
+    {
+        return temporaryStatuses.TryGetValue(statusName, out float end) && Time.time < end;
+    }
+
+    // return all temporary statuses of Humanoid that still remaining
+    public List<string> GetTemporaryStatuses()
+    {
+        return new(temporaryStatuses.Keys);
+    }
+
     // adding a new status into Humanoid
     public void AddStatus(string statusName)
     {
         if (statuses.Contains(statusName)) return;
         statuses.Add(statusName);
+
+        OnStatusAdded?.Invoke(statusName);
+    }
+
+    // adding a new temporary status into Humanoid
+    public void AddTemporaryStatus(string statusName, float timeout)
+    {
+        temporaryStatuses[statusName] = Time.time + timeout;
+        OnTemporaryStatusAddedOrChanged?.Invoke(statusName, timeout);
     }
 
     // removing an available status from the Humanoid
     public void RemoveStatus(string statusName)
     {
-        if (!statuses.Contains(statusName)) return;
-        statuses.Remove(statusName);
+        if (statuses.Contains(statusName))
+        {
+            statuses.Remove(statusName);
+            OnStatusRemoved?.Invoke(statusName);
+        }
+    }
+
+    // removing an available temporary status from the Humanoid
+    public void RemoveTemporaryStatus(string statusName)
+    {
+        if (temporaryStatuses.ContainsKey(statusName))
+        {
+            temporaryStatuses.Remove(statusName);
+            OnTemporaryStatusRemoved?.Invoke(statusName);
+        }
     }
 
     // changing an available status from the Humanoid to another desired status
@@ -633,28 +1026,38 @@ public class Humanoid : MonoBehaviour
         
         statuses.Remove(fromStatus);
         statuses.Add(toStatus);
+
+        OnStatusChanged?.Invoke(fromStatus, toStatus);
     }
     #endregion
 
     #region API
     public void Move(Vector3 Direction, bool Running)
     {
-        if (!isAlive)
+        if (!isAlive || !canMove || platformStanding)
             return;
         
         if (Direction.sqrMagnitude <= 0.001f)
         {
             ChangeState(HumanoidStateType.Idle);
+            isMoving = false;
+
             return;
         }
 
         Direction.Normalize();
 
+        float control = isGrounded ? 1f : airControl;
         float speed = (Running && stamina > 0) ? runningSpeed : walkSpeed;
-        Vector3 velocity = Direction * speed;
+        Vector3 velocity = Direction * speed * control;
 
         velocity.y = rigidBody.linearVelocity.y;
         rigidBody.linearVelocity = velocity;
+
+        if (autoRotate)
+            FaceDirection(Direction);
+
+        isMoving = true;
 
         if (Direction.sqrMagnitude > 0.001f)
         {
@@ -668,18 +1071,31 @@ public class Humanoid : MonoBehaviour
 
         ChangeState(Running ? HumanoidStateType.Running : HumanoidStateType.Walking);
         if (Running)
+        {
+            staminaUsedTimer += Time.deltaTime;
+
+            if (staminaUsedTimer >= staminaDecrementTick)
+            {
+                bool isSuccess = TryUsingStamina(staminaDecrementAmount);
+                staminaUsedTimer = 0;
+
+                if (!isSuccess)
+                    Running = false;
+            }
             OnRunning?.Invoke();
+        }
         else
+        {
             OnWalking?.Invoke();
+        }
     }
 
     public void Jump()
     {
-        if (!isAlive)
+        if (!isAlive || !isGrounded || !canJump || platformStanding)
             return;
-        
-        if (!isGrounded)
-            return;
+
+        isJumping = true;
 
         Vector3 velocity = rigidBody.linearVelocity;
         velocity.y = 0;
@@ -691,37 +1107,88 @@ public class Humanoid : MonoBehaviour
         OnJumping?.Invoke();
     }
 
+    public void FaceDirection(Vector3 direction)
+    {
+        if (direction.sqrMagnitude <= 0.001f)
+            return;
+        
+        direction.y = 0;
+
+        // double-check after set y of direction to 0
+        if (direction.sqrMagnitude <= 0.001f)
+            return;
+
+        facingDirection = direction.normalized;
+
+        Quaternion lookDir = Quaternion.LookRotation(facingDirection, Vector3.up);
+        rigidBody.MoveRotation(lookDir);
+    }
+
     #endregion
 
     #region UnityHelpers
     private void Awake()
     {
-        rigidBody = GetComponent<Rigidbody>();
+        if (rigidBody == null) rigidBody = GetComponent<Rigidbody>();
+        if (rootPart == null) rootPart = transform;
+        if (bodyCollider == null) bodyCollider = GetComponent<Collider>(); 
+
+        isAlive = health > 0;
+        isMoving = moveDirection.sqrMagnitude > 0.001f;
 
         health = maxHealth;
         walkSpeed = maxWalkSpeed;
         runningSpeed = maxRunningSpeed;
         jumpPower = maxJumpPower;
         stamina = maxStamina;
+
+        lastStaminaUseTime = 0;
     }
 
     private void Update()
     {
-        foreach (var action in actions)
-        {
-            if (Input.GetKey(action.Key))
-                action.Value?.Invoke();
-        }
-
-        HandleFallTracking();
+        // character
         HandleHealthRegeneration();
-        HandleFloorInfo();
+        HandleStaminaRegeneration();
+
+        // status
+        HandleTemporaryStatus();
     }
 
     private void FixedUpdate()
     {
+        // character physics
+        HandleFloorInfo();
+        HandleFallTracking();
+
         linearVelocity = rigidBody.linearVelocity;
         angularVelocity = rigidBody.angularVelocity;
+    }
+    
+    private void OnValidate()
+    {
+        maxHealth = Mathf.Max(1, maxHealth);
+        maxWalkSpeed = Mathf.Max(1, maxWalkSpeed);
+        maxRunningSpeed = Mathf.Max(1, maxRunningSpeed);
+        maxJumpPower = Mathf.Max(1, maxJumpPower);
+        maxStamina = Mathf.Max(1, maxStamina);
+
+        health = Mathf.Clamp(health, 0, maxHealth);
+        walkSpeed = Mathf.Clamp(walkSpeed, 1, maxWalkSpeed);
+        runningSpeed = Mathf.Clamp(runningSpeed, 1, maxRunningSpeed);
+        jumpPower = Mathf.Clamp(jumpPower, 1, maxJumpPower);
+        stamina = Mathf.Clamp(stamina, 0, maxStamina);
+
+        staminaDecrementTick = Mathf.Max(EPS_TIMER, staminaDecrementTick);
+        healthRegenerationTick = Mathf.Max(EPS_TIMER, healthRegenerationTick);
+        staminaRegenerationTick = Mathf.Max(EPS_TIMER, staminaRegenerationTick);
+    }
+
+    private void Reset()
+    {
+        rigidBody = GetComponent<Rigidbody>();
+        bodyCollider = GetComponent<Collider>();
+        rootPart = transform;
     }
     #endregion
 
