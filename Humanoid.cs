@@ -1,4 +1,5 @@
-/* Humanoid, module for Humanoid system of character, Unity. Works for Unity >6.                      *
+/* ************************************************************************************************** *
+ * Humanoid, module for Humanoid system of character, Unity. Works for Unity >6.                      *
  * Created by Raihan, May 28 - 2 June, 2026. v1.0.0                                                   *
  * Free usage, MIT License in GitHub repository.                                                      *
  *                                                                                                    *
@@ -14,24 +15,35 @@
  * @raihanaufal_77 in Instagram.                                                                      * 
  *                                                                                                    *
  * But, I'm not too active in media socials. Therefore, you need some times for waiting my responses. *
- * */
+ * ************************************************************************************************** */
  
 
 using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-[Serializable] public enum HumanoidStateType { 
-    Running, 
-    Walking, 
-    Jumping, 
-    Idle, 
-    Died,  
-    Airborne,
-    Grounded,
-    Neutral };
+/// <summary>
+/// Enumerations of Humanoid's State Type, when Humanoid is in a conceptual state by the world.
+/// </summary>
+[Serializable] public enum HumanoidStateType 
+{ 
+    Running, // Humanoid is Running, duality condition with Walking
+    Walking, // Humanoid is Walking, duality condition with Running
+    Jumping, // Humanoid is Jumping, happened when Humanoid is used Jump()
+    Idle,    // Humanoid is Idling, happened when there is no condition happened
+    Died,    // Humanoid is Died, happened when Humanoid's health is 0
+    Airborne, // Humanoid is in Airborne, happened when Humanoid's is in air by the physics
+    Grounded, // Humanoid is on ground or landed, happened when Humanoid landed on ground after airborne
+    Neutral  // Humanoid is not in written state, there is no conceptual state of the Humanoid
+};
+/// <summary>
+/// Enumerations of Humanoid's Owner Type, the owner type of controller from the Humanoid.
+/// </summary>
 [Serializable] public enum HumanoidOwnerType { Player, AI, Neutral };
 
+/// <summary>
+/// Humanoid's module script, as Humanoid "component" of this trasform.
+/// </summary>
 [Serializable] [RequireComponent(typeof(Rigidbody))] [RequireComponent(typeof(Collider))]
 public class Humanoid : MonoBehaviour 
 { 
@@ -144,25 +156,25 @@ public class Humanoid : MonoBehaviour
 
     #region ReadReferences
     /* Max references */
-    public float MaxHealth => maxHealth;
-    public float MaxWalkSpeed => maxWalkSpeed;
-    public float MaxRunningSpeed => maxRunningSpeed;
-    public float MaxJumpPower => maxJumpPower;
-    public float MaxStamina => maxStamina;
+    public float MaxHealth => maxHealth; // Humanoid's Max Health, clamping Humanoid's health
+    public float MaxWalkSpeed => maxWalkSpeed; // Humanoid's Max Walk Speed, clamping Humanoid's Walk Speed
+    public float MaxRunningSpeed => maxRunningSpeed; // Humanoid's Max Running Speed, clamping Humanoid's Running Speed
+    public float MaxJumpPower => maxJumpPower; // Humanoid's Max Jump Power, clamping Humanoid's Jump Power
+    public float MaxStamina => maxStamina; // Humanoid's Max Stamina, clamping Humanoid's Stamina
 
     /* Player's state */
-    public HumanoidStateType StateType => stateType;
-    public HumanoidOwnerType OwnerType => ownerType;
+    public HumanoidStateType StateType => stateType; // Humanoid's State Type, getting the current state of Humanoid
+    public HumanoidOwnerType OwnerType => ownerType; // Humanoid's Owner Type, getting the current owner of Humanoid
 
     /* Physics */
-    public Vector3 LinearVelocity => linearVelocity;
-    public Vector3 AngularVelocity => angularVelocity;
-    public float VerticalVelocity => linearVelocity.y;
-    public float HorizontalSpeed { get { Vector3 vc = linearVelocity; vc.y = 0; return vc.magnitude; } }
-    public Vector3 MoveDirection => moveDirection;
-    public Vector3 LastMoveDirection => lastMoveDirection;
-    public Vector3 FacingDirection => facingDirection;
-    public Rigidbody RigidBody => rigidBody;
+    public Vector3 LinearVelocity => linearVelocity; // Humanoid's Linear Horizontal Velocity, getting the horizontal velocity of the rigidbody
+    public Vector3 AngularVelocity => angularVelocity; // Humanoid's Angular Velocity, getting the angular velocity of the rigidbody
+    public float VerticalVelocity => linearVelocity.y; // Humanoid's Linear Vertical Velocity, getting the vertical velocity of the rigidbody
+    public float HorizontalSpeed { get { Vector3 vc = linearVelocity; vc.y = 0; return vc.magnitude; } } // Humanoid's moving speed in horizontal
+    public Vector3 MoveDirection => moveDirection; // Humanoid's move direction (normalized)
+    public Vector3 LastMoveDirection => lastMoveDirection; // Humanoid's last move direction (normalized)
+    public Vector3 FacingDirection => facingDirection; // Humanoid's facing direction (normalized)
+    public Rigidbody RigidBody => rigidBody; // 
     public Transform RootPart => rootPart;
     public Collider BodyCollider => bodyCollider;
     public float AirControl => airControl;
@@ -429,7 +441,10 @@ public class Humanoid : MonoBehaviour
     #region Methods
     /* Methods functions */
 
-    // Giving damage to Humanoid, by decreasing the health of the humanoid
+    /// <summary>
+    /// Giving damage to Humanoid, by decreasing the health of the humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >0</param>
     public void TakeDamage(float amount)
     {
         // Checking the value of "damageSize"
@@ -450,10 +465,13 @@ public class Humanoid : MonoBehaviour
         lastDamagedTime = Time.time;
     }
 
-    // Giving some health to Humanoid
+    /// <summary>
+    /// Giving or healing some health to Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >0</param>
     public void Heal(float amount)
     {
-        if (!isAlive || amount <= 0f)
+        if (!isAlive || amount <= 0)
             return;
 
         float oldHealth = health;        
@@ -464,7 +482,10 @@ public class Humanoid : MonoBehaviour
             Healed?.Invoke(healedHealth);
     }
 
-    // Calling-back or Revive Humanoid to the world, with gaining some reviveHealthAmount
+    /// <summary>
+    /// Calling-back or Revive Humanoid to the world, with gaining some health amount as revived
+    /// </summary>
+    /// <param name="reviveHealthAmount">reviveHealthAmount must be >1 or same/less than maxHealth</param>
     public void Revive(float reviveHealthAmount)
     {
         if (isAlive)
@@ -477,7 +498,11 @@ public class Humanoid : MonoBehaviour
         Revived?.Invoke();
     }
 
-    // Comparing to current stamina and the decrement amount, in order to decrease the current stamina of Humanoid
+    /// <summary>
+    /// Comparing to current stamina and the decrement amount, in order to decrease the current stamina of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must less than Stamina</param>
+    /// <returns>True/False</returns>
     public bool TryUsingStamina(float amount)
     {
         if (amount > stamina)
@@ -488,7 +513,9 @@ public class Humanoid : MonoBehaviour
         return true;
     }
 
-     // Set Humanoid's health to 0
+     /// <summary>
+     /// Killing and set Humanoid's health to 0
+     /// </summary>
     public void Kill()
     {   
         if (!isAlive)
@@ -506,11 +533,22 @@ public class Humanoid : MonoBehaviour
         Died?.Invoke();
     }
 
+    /// <summary>
+    /// Moving Humanoid to desired location with no running condition
+    /// </summary>
+    /// <param name="Location">Location must be Vector3</param>
+    /// <returns>True/False</returns>
     public bool MoveTo(Vector3 Location)
     {
         return MoveTo(Location, false);
     }
 
+    /// <summary>
+    /// Moving Humanoid to desired location with optional running condition or not
+    /// </summary>
+    /// <param name="Location">Location must be Vector3</param>
+    /// <param name="Running">Will Humanoid run or not? (True/False)</param>
+    /// <returns>True/False</returns>
     public bool MoveTo(Vector3 Location, bool Running)
     {
         if (!CanMove)
@@ -535,6 +573,9 @@ public class Humanoid : MonoBehaviour
         return true;
     }
 
+    /// <summary>
+    /// Stopping or killing the movement of Humanoid and set the state to Idle
+    /// </summary>
     public void StopMovement()
     {
         Vector3 velocity = rigidBody.linearVelocity;
@@ -550,7 +591,10 @@ public class Humanoid : MonoBehaviour
 
     /* setters */
 
-    // Set Humanoid's linear velocity
+    /// <summary>
+    /// Setting the Linear Velocity of Humanoid
+    /// </summary>
+    /// <param name="direction">Direction must be Vector3</param>
     public void SetHumanoidLinearVelocity(Vector3 direction)
     {
         Vector3 old = linearVelocity;
@@ -560,7 +604,10 @@ public class Humanoid : MonoBehaviour
             OnLinearVelocityChanged?.Invoke(old, linearVelocity);
     }
 
-    // Set Humanoid's angular velocity
+    /// <summary>
+    /// Setting the Angular Velocity of Humanoid
+    /// </summary>
+    /// <param name="direction">Direction must be Vector3</param>
     public void SetHumanoidAngularVelocity(Vector3 direction)
     {
         Vector3 old = angularVelocity;
@@ -570,7 +617,10 @@ public class Humanoid : MonoBehaviour
             OnAngularVelocityChanged?.Invoke(old, angularVelocity);
     }
 
-    // Set Humanoid's health in amount, up to the MaxHealth
+    /// <summary>
+    /// Setting the Health of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >0 and same/less than MaxHealth</param>
     public void SetHumanoidHealth(float amount)
     {
         float oldHealth = health;
@@ -583,7 +633,10 @@ public class Humanoid : MonoBehaviour
             Kill();
     }
 
-    // Set Humanoid's walking speed in amount, up to the MaxWalkSpeed
+    /// <summary>
+    /// Setting the WalkSpeed of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >0 and same/less than MaxWalkSpeed</param>
     public void SetHumanoidWalkSpeed(float amount)
     {
         if (amount > runningSpeed)
@@ -596,7 +649,10 @@ public class Humanoid : MonoBehaviour
             OnWalkSpeedChanged?.Invoke(oldWalkSpeed, walkSpeed);
     }
 
-    // Set Humanoid's running speed in amount, up to MaxRunningSpeed
+    /// <summary>
+    /// Setting the RunningSpeed of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >0 and same/less than MaxRunningSpeed</param>
     public void SetHumanoidRunningSpeed(float amount)
     {
         if (amount < walkSpeed)
@@ -609,7 +665,10 @@ public class Humanoid : MonoBehaviour
             OnRunningSpeedChanged?.Invoke(oldRunningSpeed, runningSpeed);
     }
 
-    // Set Humanoid's jump power in amount, up to MaxJumpPower
+    /// <summary>
+    /// Setting the JumpPower of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >0 and same/less than MaxJumpPower</param>
     public void SetHumanoidJumpPower(float amount)
     {
         float oldJumpPower = jumpPower;
@@ -619,7 +678,10 @@ public class Humanoid : MonoBehaviour
             OnJumpPowerChanged?.Invoke(oldJumpPower, jumpPower);
     }
 
-    // Set Humanoid's stamina in amount, up to MaxStamina
+    /// <summary>
+    /// Setting the Stamina of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >0 and same/less than MaxStamina</param>
     public void SetHumanoidStamina(float amount)
     {
         float oldStamina = stamina;
@@ -629,7 +691,10 @@ public class Humanoid : MonoBehaviour
             OnStaminaChanged?.Invoke(oldStamina, stamina);
     }
 
-    // Set Humanoid's stamina decrement amount, up to Stamina itself
+    /// <summary>
+    /// Setting the StaminaDecrementAmount of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >0</param>
     public void SetHumanoidStaminaDecrementAmount(float amount)
     {
         float oldStaminaDecAmount = staminaDecrementAmount;
@@ -639,7 +704,10 @@ public class Humanoid : MonoBehaviour
             OnStaminaDecrementAmountChanged?.Invoke(oldStaminaDecAmount, staminaDecrementAmount);
     }
 
-    // Set Humanoid's stamina decrement tick time
+    /// <summary>
+    /// Setting the StaminaDecrementTick of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >0</param>
     public void SetHumanoidStaminaDecrementTick(float amount)
     {
         float oldStaminaDecTick = staminaDecrementTick;
@@ -649,7 +717,10 @@ public class Humanoid : MonoBehaviour
             OnStaminaDecrementTickChanged?.Invoke(oldStaminaDecTick, staminaDecrementTick);
     }
 
-    // Set Humanoid's health regeneration amount, up to health size
+    /// <summary>
+    /// Setting the HealthRegenerationAmount of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >0</param>
     public void SetHumanoidHealthRegenerationAmount(float amount)
     {
         float old = healthRegenerationAmount;
@@ -659,7 +730,10 @@ public class Humanoid : MonoBehaviour
             OnHealthRegenerationAmountChanged?.Invoke(old, healthRegenerationAmount);
     }
 
-    // Set Humanoid's health regeneration tick time
+    /// <summary>
+    /// Setting the HealthRegenerationTick of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >=0</param>
     public void SetHumanoidHealthRegenerationTick(float amount)
     {
         float old = healthRegenerationTick;
@@ -669,7 +743,10 @@ public class Humanoid : MonoBehaviour
             OnHealthRegenerationTickChanged?.Invoke(old, healthRegenerationTick);
     }
 
-    // Set Humanoid's health regeneration delay
+    /// <summary>
+    /// Setting the HealthRegenerationDelay of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >=0.05</param>
     public void SetHumanoidHealthRegenerationDelay(float amount)
     {
         float old = healthRegenerationDelay;
@@ -679,7 +756,10 @@ public class Humanoid : MonoBehaviour
             OnHealthRegenerationDelayChanged?.Invoke(old, healthRegenerationDelay);
     }
 
-    // Set Humanoid's stamina regeneration amount, up to stamina size
+    /// <summary>
+    /// Setting the StaminaRegenerationAmount of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >=0</param>
     public void SetHumanoidStaminaRegenerationAmount(float amount)
     {
         float old = staminaRegenerationAmount;
@@ -689,7 +769,10 @@ public class Humanoid : MonoBehaviour
             OnStaminaRegenerationAmountChanged?.Invoke(old, staminaRegenerationAmount);
     }
 
-    // Set Humanoid's stamina regeneration tick time
+    /// <summary>
+    /// Setting the StaminaRegenerationTick of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >=0.05</param>
     public void SetHumanoidStaminaRegenerationTick(float amount)
     {
         float old = staminaRegenerationTick;
@@ -699,7 +782,10 @@ public class Humanoid : MonoBehaviour
             OnStaminaRegenerationTickChanged?.Invoke(old, staminaRegenerationTick);
     }
 
-    // Set Humanoid's stamina regeneration delay
+    /// <summary>
+    /// Setting the StaminaDecrementTick of Humanoid
+    /// </summary>
+    /// <param name="amount">Amount must be >=0.05</param>
     public void SetHumanoidStaminaRegenerationDelay(float amount)
     {
         float old = staminaRegenerationDelay;
@@ -709,7 +795,10 @@ public class Humanoid : MonoBehaviour
             OnStaminaRegenerationDelayChanged?.Invoke(old, staminaRegenerationDelay);
     }
 
-    // Set Humanoid's health regeneration permission
+    /// <summary>
+    /// Setting the HealthRegenerationEnabled of Humanoid
+    /// </summary>
+    /// <param name="enabled">True or False?</param>
     public void SetHumanoidHealthRegenerationEnabled(bool enabled)
     {
         bool old = healthRegenerationEnabled;
@@ -719,7 +808,10 @@ public class Humanoid : MonoBehaviour
             OnHealthRegenerationEnabledChanged?.Invoke();
     }
 
-    // Set Humanoid's stamina regeneration permission
+    /// <summary>
+    /// Setting the StaminaRegenerationEnabled of Humanoid
+    /// </summary>
+    /// <param name="enabled">True or False?</param>
     public void SetHumanoidStaminaRegenerationEnabled(bool enabled)
     {
         bool old = staminaRegenerationEnabled;
@@ -729,7 +821,10 @@ public class Humanoid : MonoBehaviour
             OnStaminaRegenerationEnabledChanged?.Invoke();
     }
 
-    // Set Humanoid's camera offset by the camera of player
+    /// <summary>
+    /// Setting the Humanoid's camera offset that will be handled by HumanoidMotor
+    /// </summary>
+    /// <param name="offset">Offset must be Vector3</param>
     public void SetHumanoidCameraOffset(Vector3 offset)
     {
         Vector3 old = cameraOffset;
@@ -739,7 +834,10 @@ public class Humanoid : MonoBehaviour
             OnCameraOffsetChanged?.Invoke(old, cameraOffset);
     }
 
-    // Change Humanoid's state type to newer state
+    /// <summary>
+    /// Changing Humanoid's current state to desired state
+    /// </summary>
+    /// <param name="newType">NewType must be HumanoidStateType enums</param>
     public void ChangeState(HumanoidStateType newType)
     {
         if (!IsStateEnabled(newType))
@@ -752,7 +850,10 @@ public class Humanoid : MonoBehaviour
             OnStateChanged?.Invoke(oldState, stateType);
     }
 
-    // Adding a force to rigidbody of Humanoid
+    /// <summary>
+    /// Adding a force to RigidBody of this Humanoid
+    /// </summary>
+    /// <param name="direction">Direction must be Vector3</param>
     public void AddForce(Vector3 direction)
     {
         if (!isAlive)
@@ -761,7 +862,11 @@ public class Humanoid : MonoBehaviour
         rigidBody.AddForce(direction);
     }
 
-    // Overload: Adding a force with desired foce mode to rigidbody of Humanoid
+    /// <summary>
+    /// Overload: Adding a force to Rigidbody of this Humanoid with desired ForceMode
+    /// </summary>
+    /// <param name="direction">Direction must be Vector3</param>
+    /// <param name="forceMode">ForceMode must be ForceMode enums</param>
     public void AddForce(Vector3 direction, ForceMode forceMode)
     {
         if (!isAlive)
@@ -770,7 +875,11 @@ public class Humanoid : MonoBehaviour
         rigidBody.AddForce(direction, forceMode);    
     }
 
-    // Change Humanoid's state to become enabled or disabled
+    /// <summary>
+    /// Adding a conditional state of Humanoid to be enabled/disabled
+    /// </summary>
+    /// <param name="state">State must be HumanoidStateType enums</param>
+    /// <param name="enable">True/False</param>
     public void SetStateEnabled(HumanoidStateType state, bool enable)
     {
         if (enable)
@@ -779,12 +888,20 @@ public class Humanoid : MonoBehaviour
             disableStates.Add(state);
     }
 
-    // Comparing a state that enabled in this Humanoid
+    /// <summary>
+    /// Comparing an enabled state with desired state
+    /// </summary>
+    /// <param name="state">State must be HumanoidStateType enums</param>
+    /// <returns>True/False</returns>
     public bool IsStateEnabled(HumanoidStateType state)
     {
         return !disableStates.Contains(state);
     }
 
+    /// <summary>
+    /// Changing the Humanoid user controller to desired owner type
+    /// </summary>
+    /// <param name="newType">NewType must be HumanoidOwnerType enums</param>
     public void ChangeOwner(HumanoidOwnerType newType)
     {
         HumanoidOwnerType oldType = ownerType;
@@ -794,28 +911,44 @@ public class Humanoid : MonoBehaviour
             OnOwnerChanged?.Invoke(oldType, ownerType);
     }
 
-    // Comparing current state with a state status
+    /// <summary>
+    /// Comparing if Humanoid is in desired state
+    /// </summary>
+    /// <param name="type">Type must be HumanoidStateType enums</param>
+    /// <returns>True/False</returns>
     public bool IsInState(HumanoidStateType type)
     {
         return stateType == type;
     }
 
     
+    /// <summary>
+    /// Locking current movement of Humanoid
+    /// </summary>
     public void LockMovement()
     {
         movementLockCount++;
     }
 
+    /// <summary>
+    /// Unlocking the current movement of Humanoid
+    /// </summary>
     public void UnlockMovement()
     {
         movementLockCount = Mathf.Max(0, movementLockCount - 1);
     }
 
+    /// <summary>
+    /// Locking jump condition of Humanoid
+    /// </summary>
     public void LockJump()
     {
         jumpLockCount++;
     }
 
+    /// <summary>
+    /// Unlocking the jump condition of Humanoid
+    /// </summary>
     public void UnlockJump()
     {
         jumpLockCount = Mathf.Max(0, jumpLockCount - 1);
@@ -823,7 +956,10 @@ public class Humanoid : MonoBehaviour
 
     /* max properties */
 
-    // Set Humanoid's max health
+    /// <summary>
+    /// Setting the Humanoid's MaxHealth, that clamping Humanoid's Health
+    /// </summary>
+    /// <param name="amount">Amount must be >=1</param>
     public void SetHumanoidMaxHealth(float amount)
     {
         float old = maxHealth;
@@ -835,7 +971,10 @@ public class Humanoid : MonoBehaviour
             OnMaxHealthChanged?.Invoke(old, maxHealth);
     }
 
-    // Set Humanoid's max walk speed
+    /// <summary>
+    /// Setting the Humanoid's MaxWalkSpeed, that clamping Humanoid's WalkSpeed
+    /// </summary>
+    /// <param name="amount">Amount must be >=1</param>
     public void SetHumanoidMaxWalkSpeed(float amount)
     {
         float old = maxWalkSpeed;
@@ -847,7 +986,10 @@ public class Humanoid : MonoBehaviour
             OnMaxWalkSpeedChanged?.Invoke(old, maxWalkSpeed);
     }
 
-    // Set Humanoid's max running speed
+    /// <summary>
+    /// Setting the Humanoid's MaxRunningSpeed, that clamping Humanoid's RunningSpeed
+    /// </summary>
+    /// <param name="amount">Amount must be >=1</param>
     public void SetHumanoidMaxRunningSpeed(float amount)
     {
         float old = maxRunningSpeed;
@@ -859,7 +1001,10 @@ public class Humanoid : MonoBehaviour
             OnMaxRunningSpeedChanged?.Invoke(old, maxRunningSpeed);
     }
 
-    // Set Humanoid's max jump power
+    /// <summary>
+    /// Setting the Humanoid's MaxJumpPower, clamping Humanoid's JumpPower
+    /// </summary>
+    /// <param name="amount">Amount must be >=1</param>
     public void SetHumanoidMaxJumpPower(float amount)
     {
         float old = maxJumpPower;
@@ -871,7 +1016,10 @@ public class Humanoid : MonoBehaviour
             OnMaxJumpPowerChanged?.Invoke(old, maxJumpPower);
     }
 
-    // Set Humanoid's max stamina
+    /// <summary>
+    /// Setting the Humanoid's MaxStamina, clamping Humanoid's Stamina
+    /// </summary>
+    /// <param name="amount">Amount must be >=1</param>
     public void SetHumanoidMaxStamina(float amount)
     {
         float old = maxStamina;
@@ -883,7 +1031,10 @@ public class Humanoid : MonoBehaviour
             OnMaxStaminaChanged?.Invoke(old, maxStamina);
     }
 
-    // Set Humanoid's can move
+    /// <summary>
+    /// Setting Humanoid's access to move
+    /// </summary>
+    /// <param name="enable">True/False</param>
     public void SetHumanoidCanMove(bool enable)
     {
         bool old = canMove;
@@ -893,7 +1044,10 @@ public class Humanoid : MonoBehaviour
             OnCanMoveChanged?.Invoke(old, enable);
     }
 
-    // Set Humanoid's can jump
+    /// <summary>
+    /// Setting Humanoid's access to jump
+    /// </summary>
+    /// <param name="enable">True/False</param>
     public void SetHumanoidCanJump(bool enable)
     {
         bool old = canJump;
@@ -903,7 +1057,10 @@ public class Humanoid : MonoBehaviour
             OnCanJumpChanged?.Invoke(old, enable);
     }
 
-    // Set Humanoid's walk to stopping distance
+    /// <summary>
+    /// Setting Humanoid's WalkToStoppingDistance, that used for Humanoid minimum distance to stop of MoveTo() or HumanoidMotor
+    /// </summary>
+    /// <param name="amount">Amount must be >=0</param>
     public void SetHumanoidWalkToStoppingDistance(float amount)
     {
         float old = walkToStoppingDistance;
@@ -913,14 +1070,20 @@ public class Humanoid : MonoBehaviour
             OnWalkToStoppingDistanceChanged?.Invoke(old, walkToStoppingDistance);
     }
 
-    // Set Humanoid's ground height
+    /// <summary>
+    /// Setting Humanoid's ToGroundHeight, that give distance of center of Humanoid's RootPart towards ground to check
+    /// </summary>
+    /// <param name="amount">Amount must be >=0</param>
     public void SetHumanoidToGroundHeight(float amount)
     {
         amount = Mathf.Max(0, amount);
         toGroundHeight = amount;
     }
 
-    // Set Humanoid's air control
+    /// <summary>
+    /// Setting Humanoid's AirControl, that gives scale of air control for Humanoid to walk on air
+    /// </summary>
+    /// <param name="amount">Amount must between 0 - 1</param>
     public void SetHumanoidAirControl(float amount)
     {
         float old = airControl;
@@ -930,7 +1093,10 @@ public class Humanoid : MonoBehaviour
             OnAirControlChanged?.Invoke(old, airControl);
     }
 
-    // Set Humanoid's auto rotate
+    /// <summary>
+    /// Setting Humanoid's AutoRotate, that let the transform of this Humanoid rotates towards the direction of current movement
+    /// </summary>
+    /// <param name="enable">True/False</param>
     public void SetHumanoidAutoRotate(bool enable)
     {
         bool old = autoRotate;
@@ -940,7 +1106,10 @@ public class Humanoid : MonoBehaviour
             OnAutoRotateChanged?.Invoke(old, autoRotate);
     }
 
-    // Set Humanoid's can apply fall damage
+    /// <summary>
+    /// Setting Humanoid's CanApplyFallDamage, to set access for Humanoid can take damage when fell and hit the ground
+    /// </summary>
+    /// <param name="enable"></param>
     public void SetHumanoidCanApplyFallDamage(bool enable)
     {
         bool old = canApplyFallDamage;
@@ -950,7 +1119,10 @@ public class Humanoid : MonoBehaviour
             OnCanApplyFallDamageChanged?.Invoke(old, canApplyFallDamage);
     }
 
-    // Set Humanoid's max slope angle
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name="amount"></param>
     public void SetHumanoidMaxSlopeAngle(float amount)
     {
         float old = maxSlopeAngle;
