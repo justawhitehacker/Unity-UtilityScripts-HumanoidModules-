@@ -127,6 +127,8 @@ public class Humanoid : MonoBehaviour
     [SerializeField] private float walkToStoppingDistance = 0.5f;
     [SerializeField] private float toGroundHeight = 1.5f;
 
+    [SerializeField] private bool letCheckGround = false;
+
     [SerializeField] private Vector3 cameraOffset = Vector3.zero;
     [SerializeField] private bool canMove = true;
     [SerializeField] private bool canJump = true;
@@ -262,7 +264,7 @@ public class Humanoid : MonoBehaviour
     public bool IsMoving => isMoving;
     public bool PlatformStanding => platformStanding;
     public bool CanMove => canMove && !platformStanding && isAlive && movementLockCount <= 0;
-    public bool CanJump => canJump && !isGrounded && stateType != HumanoidStateType.Airborne && !platformStanding && isAlive && jumpLockCount <= 0;
+    public bool CanJump => canJump && !isGrounded && stateType != HumanoidStateType.Airborne && stateType != HumanoidStateType.FreeFalling && !platformStanding && isAlive && jumpLockCount <= 0;
     public bool AutoRotate => autoRotate;
     public bool IsJumping => isJumping;
     public bool CanApplyFallDamage => canApplyFallDamage;
@@ -418,7 +420,7 @@ public class Humanoid : MonoBehaviour
 
         if (!isGrounded && linearVelocity.y < -0.1f)
         {
-            if (stateType == HumanoidStateType.Airborne || stateType != HumanoidStateType.FreeFalling)
+            if (stateType == HumanoidStateType.Airborne && stateType != HumanoidStateType.FreeFalling)
             {
                 ChangeState(HumanoidStateType.FreeFalling);
 
@@ -441,6 +443,8 @@ public class Humanoid : MonoBehaviour
     
     private void HandleFloorInfo()
     {
+        if (!letCheckGround) return;
+
         bool oldGrounded = isGrounded;
 
         if (Physics.Raycast(rootPart.position, Vector3.down, out RaycastHit info, toGroundHeight))
@@ -1206,6 +1210,14 @@ public class Humanoid : MonoBehaviour
 
         if (old != platformStanding)
             OnPlatformStandingChanged?.Invoke(old, platformStanding);
+    }
+
+    public void SetHumanoidIsGrounded(bool enabled)
+    {
+        if (isGrounded == enabled)
+            return;
+
+        isGrounded = enabled;
     }
 
     // Set Humanoid's safe from fall damage distance
