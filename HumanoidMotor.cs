@@ -1,8 +1,5 @@
 using System;
-using Unity.Collections;
 using UnityEngine;
-using UnityEngine.EventSystems;
-using UnityEngine.InputSystem.LowLevel;
 
 [Serializable] [RequireComponent(typeof(Humanoid))] [RequireComponent(typeof(Rigidbody))] [RequireComponent(typeof(Collider))]
 public class HumanoidMotor : MonoBehaviour
@@ -38,6 +35,7 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private float checkDistance = 0.65f;
     [SerializeField] private float groundedStickForce = 8.0f;
     [SerializeField] private float slopeSlideAcceleration = 18.0f;
+    [SerializeField] private float ignoreGroundAfterJump = 0.08f;
 
     [Header("Jump")]
     [SerializeField] private float jumpHeight = 2.2f;
@@ -88,6 +86,7 @@ public class HumanoidMotor : MonoBehaviour
     private float lastJumpRequestTime;
     private float lastJumpTime;
     private float staminaUsedTimer;
+    private float groundIgnoreTimer;
 
     #endregion
 
@@ -202,6 +201,18 @@ public class HumanoidMotor : MonoBehaviour
     {
         bool oldGrounded = isGrounded;
 
+        if (Time.time < groundIgnoreTimer)
+        {
+            isGrounded = false;
+            isOnSlope = false;
+            isSliding = false;
+            groundNormal = Vector3.up;
+            floorMaterial = null;
+            floorCollider = null;
+
+            return;
+        }
+
         Vector3 origin;
 
         if (groundCheck != null)
@@ -233,6 +244,8 @@ public class HumanoidMotor : MonoBehaviour
 
             isGrounded = true;
             lastGroundedTime = Time.time;
+
+            humanoid.SetHumanoidIsGrounded(true);
         }
         else
         {
@@ -244,7 +257,12 @@ public class HumanoidMotor : MonoBehaviour
             groundNormal = Vector3.zero;
             floorMaterial = null;
             floorCollider = null;
+
+            humanoid.SetHumanoidIsGrounded(false);
         }
+
+        Debug.Log($"IsChecked: {isChecked}, Grounded: {isGrounded}, canMove: {humanoid.CanMove}, canJump: {humanoid.CanJump}, move: {moveInput}, vel: {rigidBody.linearVelocity}");
+
 
         if (!oldGrounded && isGrounded)
             Grounded?.Invoke();
@@ -260,7 +278,7 @@ public class HumanoidMotor : MonoBehaviour
 
         if (targetMoveDirection.sqrMagnitude <= 0.01f)
         {
-            if (humanoid.StateType != HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling)
+            if (humanoid.StateType != HumanoidStateType.Airborne || humanoid.StateType != HumanoidStateType.FreeFalling)
             {
                 humanoid.ChangeState(HumanoidStateType.Idle);
                 humanoid.SetHumanoidIsMoving(false);
@@ -293,17 +311,14 @@ public class HumanoidMotor : MonoBehaviour
         velocity.x = newHorizontalVelocity.x;
         velocity.z = newHorizontalVelocity.z;
 
-        if (isGrounded && !isSliding && velocity.y < 0f)
-            velocity.y = -groundedStickForce;
-
         rigidBody.linearVelocity = velocity;
-        humanoid.SetHumanoidIsMoving(true);
+        humanoid.SetHumanoidIsMoving(onInput);
 
         moveDirection = onInput ? targetMoveDirection.normalized : Vector3.zero;
         if (onInput)
             lastMoveDirection = targetMoveDirection.normalized;
 
-        if (humanoid.StateType != HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling && isGrounded)
+        if (humanoid.StateType != HumanoidStateType.Airborne || humanoid.StateType != HumanoidStateType.FreeFalling || isGrounded)
             humanoid.ChangeState(runReady ? HumanoidStateType.Running : HumanoidStateType.Walking);
 
         if (runReady)
@@ -329,16 +344,11 @@ public class HumanoidMotor : MonoBehaviour
 
     private void HandleJump()
     {
-        bool hasTimeBuffer = Time.time - lastJumpRequestTime <= jumpBufferTime;
-        bool canCoyote = Time.time - lastGroundedTime <= coyoteTime;
+        bool hasTimeBuffer = jumpRequested && Time.time - lastJumpRequestTime <= jumpBufferTime;
+        bool canCoyote = isGrounded || Time.time - lastGroundedTime <= coyoteTime;
         bool cooldownReady = Time.time - lastJumpTime >= jumpCooldown;
 
-        if (!cooldownReady) return;
-
-        if (!jumpRequested && !hasTimeBuffer)
-            return;
-        
-        if (!isGrounded && !canCoyote)
+        if (!cooldownReady || !canCoyote || !hasTimeBuffer)
             return;
 
         float power = Mathf.Abs(Physics.gravity.y * gravityScale);
@@ -348,15 +358,20 @@ public class HumanoidMotor : MonoBehaviour
 
         float jumpVelocity = Mathf.Sqrt(2f * power * jumpHeight);
 
-        Vector3 velocity = rigidBody.linearVelocity;
-        velocity.y = 0;
+        Vector3 velocity = new Vector3(rigidBody.linearVelocity.x, 0, rigidBody.linearVelocity.z);
         velocity.y += jumpVelocity;
 
         rigidBody.linearVelocity = velocity;
 
         jumpRequested = false;
+        lastJumpRequestTime = -999f;
+
         lastJumpTime = Time.time;
+        lastGroundedTime = -999f;
+
         isGrounded = false;
+        humanoid.SetHumanoidIsGrounded(false);
+        groundIgnoreTimer = Time.time + ignoreGroundAfterJump;
 
         humanoid.ChangeState(HumanoidStateType.Jumping);
         OnJumping?.Invoke();
@@ -366,6 +381,15 @@ public class HumanoidMotor : MonoBehaviour
     {
         Vector3 velocity = rigidBody.linearVelocity;
         float gravityMultiplier = gravityScale;
+
+        if (isGrounded)
+        {
+            if (velocity.y < 0f)
+                velocity.y = -groundedStickForce;
+            
+            rigidBody.linearVelocity = velocity;
+            return;
+        }
 
         if (velocity.y < 0f)
         {
@@ -385,8 +409,7 @@ public class HumanoidMotor : MonoBehaviour
             Vector3 windForce = windVelocity * windInfluence;
             velocity += windForce * Time.fixedDeltaTime;
 
-            Vector3 horizontal = velocity;
-            velocity.y = 0;
+            Vector3 horizontal = new Vector3(velocity.x, 0, velocity.y);
 
             horizontal = Vector3.Lerp
             (
@@ -468,8 +491,10 @@ public class HumanoidMotor : MonoBehaviour
         wasGrounded = isGrounded;
 
         CheckGround();
-        HandleMovement();
+
         HandleJump();
+        HandleMovement();
+
         HandleMass();
         HandleSlopeSliding();
         HandleRotation();
