@@ -20,6 +20,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Security;
+using UnityEditor;
 using UnityEngine;
 
 /// <summary>
@@ -27,19 +29,65 @@ using UnityEngine;
 /// </summary>
 [Serializable] public enum HumanoidStateType 
 { 
-    Running, // Humanoid is Running, duality condition with Walking
-    Walking, // Humanoid is Walking, duality condition with Running
-    Jumping, // Humanoid is Jumping, happened when Humanoid is used Jump()
-    Idle,    // Humanoid is Idling, happened when there is no condition happened
-    Died,    // Humanoid is Died, happened when Humanoid's health is 0
-    Airborne, // Humanoid is in Airborne, happened when Humanoid's is in air by the physics
-    Grounded, // Humanoid is on ground or landed, happened when Humanoid landed on ground after airborne
-    Neutral  // Humanoid is not in written state, there is no conceptual state of the Humanoid
+    /// <summary>
+    /// Humanoid is Running, duality condition with Walking
+    /// </summary>
+    Running, 
+    /// <summary>
+    /// Humanoid is Walking, duality condition with Running
+    /// </summary>
+    Walking,
+    /// <summary>
+    /// Humanoid is Jumping, happened when Humanoid is used Jump()
+    /// </summary> 
+    Jumping,
+    /// <summary>
+    /// Humanoid is Idling, happened when there is no condition happened
+    /// </summary>
+    Idle,
+    /// <summary>
+    /// Humanoid is Died, happened when Humanoid's health is 0
+    /// </summary>   
+    Died,
+    /// <summary>
+    /// Humanoid is in Airborne, happened when Humanoid is beginning to flying on air by the physics
+    /// </summary>
+    Airborne,
+    /// <summary>
+    /// Humanoid is in falling, happened when Humanoid is getting pulled back by gravity from air to ground
+    /// </summary>
+    FreeFalling,
+    /// <summary>
+    /// Humanoid is on ground or landed, happened when Humanoid landed on ground after free falling
+    /// </summary>
+    Grounded,
+    /// <summary>
+    /// Humanoid is getting slid, happened when Humanoid is on the slope that surpass the limit of max slope angle from this Humanoid
+    /// </summary>
+    Sliding,
+    /// <summary>
+    /// Humanoid is not in written state, there is no conceptual state of the Humanoid
+    /// </summary>
+    Neutral
 };
 /// <summary>
 /// Enumerations of Humanoid's Owner Type, the owner type of controller from the Humanoid.
 /// </summary>
-[Serializable] public enum HumanoidOwnerType { Player, AI, Neutral };
+[Serializable] public enum HumanoidOwnerType 
+{ 
+    /// <summary>
+    /// Owner type of Humanoid that being controlled by human/player through Input conditions, player allowed to do input control
+    /// </summary>
+    Player,
+    /// <summary>
+    /// Owner type of Humanoid that being controlled by script, player can't do Input conditions for this owner type
+    /// </summary>
+    AI, 
+    /// <summary>
+    /// Owner type of Humanoid that has no owner both from AI/Player
+    /// </summary>
+    Neutral 
+};
 
 /// <summary>
 /// Humanoid's module script, as Humanoid "component" of this trasform.
@@ -82,7 +130,7 @@ public class Humanoid : MonoBehaviour
     [SerializeField] private Vector3 cameraOffset = Vector3.zero;
     [SerializeField] private bool canMove = true;
     [SerializeField] private bool canJump = true;
-    [SerializeField] private bool autoRotate = true;
+    [SerializeField] private bool autoRotate = false;
 
     [Header("Max Attributes")]
     [SerializeField] private float maxHealth = 100;
@@ -138,11 +186,9 @@ public class Humanoid : MonoBehaviour
     private float fallStartY;
     private Vector3 moveDirection;
 
-    #endregion
-
-    #region PrivateHelpers
     /* timers */
     private float lastStaminaUseTime;
+    private float lastGroundedTime;
     private float staminaRegenTimer;
     private float staminaUsedTimer;
     private float lastDamagedTime;
@@ -183,6 +229,7 @@ public class Humanoid : MonoBehaviour
     public Vector3 GroundNormal => groundNormal;
     public Collider FloorCollider => floorCollider;
     public PhysicsMaterial FloorMaterial => floorMaterial;
+    public float LastGroundedTime => lastGroundedTime;
     public Vector3 TargetPoint => targetPoint;
     public float FallStartY => fallStartY;
     public float FallDistance => fallDistance;
@@ -239,6 +286,8 @@ public class Humanoid : MonoBehaviour
     public event Action OnJumping;
     public event Action OnAirborne;
     public event Action OnAirborneBegin;
+    public event Action OnFreeFalling;
+    public event Action OnFreeFallingBegin;
     public event Action OnHealthRegenerationEnabledChanged;
     public event Action OnStaminaRegenerationEnabledChanged;
 
@@ -352,7 +401,7 @@ public class Humanoid : MonoBehaviour
 
     private void HandleFallTracking()
     {
-        if (!isGrounded && linearVelocity.y > 0)
+        if (!isGrounded && linearVelocity.y > 0.1f)
         {
             if (stateType != HumanoidStateType.Airborne)
             {
@@ -367,7 +416,19 @@ public class Humanoid : MonoBehaviour
             OnAirborne?.Invoke();
         }
 
-        if (isGrounded && stateType == HumanoidStateType.Airborne)
+        if (!isGrounded && linearVelocity.y < -0.1f)
+        {
+            if (stateType == HumanoidStateType.Airborne || stateType != HumanoidStateType.FreeFalling)
+            {
+                ChangeState(HumanoidStateType.FreeFalling);
+
+                OnFreeFallingBegin?.Invoke();
+            }
+
+            OnFreeFalling?.Invoke();
+        }
+
+        if (isGrounded && stateType == HumanoidStateType.FreeFalling)
         {
             ApplyFallDamage();
 
@@ -834,6 +895,11 @@ public class Humanoid : MonoBehaviour
             OnCameraOffsetChanged?.Invoke(old, cameraOffset);
     }
 
+    public void SetHumanoidIsMoving(bool enabled)
+    {
+        isMoving = enabled;
+    }
+
     /// <summary>
     /// Changing Humanoid's current state to desired state
     /// </summary>
@@ -1291,7 +1357,7 @@ public class Humanoid : MonoBehaviour
 
         if (direction.sqrMagnitude <= 0.001f)
         {
-            if (stateType != HumanoidStateType.Airborne)
+            if (stateType != HumanoidStateType.Airborne && stateType != HumanoidStateType.FreeFalling)
                 ChangeState(HumanoidStateType.Idle);
             
             isMoving = false;
@@ -1315,8 +1381,7 @@ public class Humanoid : MonoBehaviour
         velocity.y = rigidBody.linearVelocity.y;
         rigidBody.linearVelocity = velocity;
 
-        if (autoRotate)
-            FaceDirection(direction);
+        FaceDirection(direction, autoRotate);
 
         isMoving = true;
 
@@ -1330,7 +1395,7 @@ public class Humanoid : MonoBehaviour
             moveDirection = Vector3.zero;
         }
 
-        if (stateType != HumanoidStateType.Airborne || isGrounded)
+        if (stateType != HumanoidStateType.Airborne && stateType != HumanoidStateType.FreeFalling && isGrounded)
             ChangeState(canRun ? HumanoidStateType.Running : HumanoidStateType.Walking);
 
         if (canRun)
@@ -1370,7 +1435,7 @@ public class Humanoid : MonoBehaviour
         OnJumping?.Invoke();
     }
 
-    public void FaceDirection(Vector3 direction)
+    public void FaceDirection(Vector3 direction, bool rotate)
     {
         if (direction.sqrMagnitude <= 0.001f)
             return;
@@ -1383,8 +1448,11 @@ public class Humanoid : MonoBehaviour
 
         facingDirection = direction.normalized;
 
-        Quaternion lookDir = Quaternion.LookRotation(facingDirection, Vector3.up);
-        rigidBody.MoveRotation(lookDir);
+        if (rotate)
+        {
+            Quaternion lookDir = Quaternion.LookRotation(facingDirection, Vector3.up);
+            rigidBody.MoveRotation(lookDir);
+        }
     }
 
     #endregion
