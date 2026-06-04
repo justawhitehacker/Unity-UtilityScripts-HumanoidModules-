@@ -204,6 +204,7 @@ public class HumanoidMotor : MonoBehaviour
         if (Time.time < groundIgnoreTimer)
         {
             isGrounded = false;
+            humanoid.SetHumanoidIsGrounded(false);
             isOnSlope = false;
             isSliding = false;
             groundNormal = Vector3.up;
@@ -278,7 +279,7 @@ public class HumanoidMotor : MonoBehaviour
 
         if (targetMoveDirection.sqrMagnitude <= 0.01f)
         {
-            if (humanoid.StateType != HumanoidStateType.Airborne || humanoid.StateType != HumanoidStateType.FreeFalling)
+            if (humanoid.StateType != HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling)
             {
                 humanoid.ChangeState(HumanoidStateType.Idle);
                 humanoid.SetHumanoidIsMoving(false);
@@ -318,7 +319,7 @@ public class HumanoidMotor : MonoBehaviour
         if (onInput)
             lastMoveDirection = targetMoveDirection.normalized;
 
-        if (humanoid.StateType != HumanoidStateType.Airborne || humanoid.StateType != HumanoidStateType.FreeFalling || isGrounded)
+        if (humanoid.StateType != HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling || isGrounded)
             humanoid.ChangeState(runReady ? HumanoidStateType.Running : HumanoidStateType.Walking);
 
         if (runReady)
@@ -409,7 +410,7 @@ public class HumanoidMotor : MonoBehaviour
             Vector3 windForce = windVelocity * windInfluence;
             velocity += windForce * Time.fixedDeltaTime;
 
-            Vector3 horizontal = new Vector3(velocity.x, 0, velocity.y);
+            Vector3 horizontal = new Vector3(velocity.x, 0, velocity.z);
 
             horizontal = Vector3.Lerp
             (
