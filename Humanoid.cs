@@ -264,7 +264,7 @@ public class Humanoid : MonoBehaviour
     public bool IsMoving => isMoving;
     public bool PlatformStanding => platformStanding;
     public bool CanMove => canMove && !platformStanding && isAlive && movementLockCount <= 0;
-    public bool CanJump => canJump && !isGrounded && stateType != HumanoidStateType.Airborne && stateType != HumanoidStateType.FreeFalling && !platformStanding && isAlive && jumpLockCount <= 0;
+    public bool CanJump => canJump && isGrounded && stateType != HumanoidStateType.Airborne && stateType != HumanoidStateType.FreeFalling && !platformStanding && isAlive && jumpLockCount <= 0;
     public bool AutoRotate => autoRotate;
     public bool IsJumping => isJumping;
     public bool CanApplyFallDamage => canApplyFallDamage;
