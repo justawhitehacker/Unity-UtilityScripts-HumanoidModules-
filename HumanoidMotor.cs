@@ -91,6 +91,9 @@ public class HumanoidMotor : MonoBehaviour
     private float lastJumpTime;
     private float staminaUsedTimer;
     private float groundIgnoreTimer;
+    private float idleStayingTimer;
+
+    private float idleStayingCounter;
 
     #endregion
 
@@ -109,12 +112,80 @@ public class HumanoidMotor : MonoBehaviour
 
     public event Action<Vector3> OnWalking;
     public event Action<Vector3> OnRunning;
+    public event Action<Vector3> OnRotating;
+
+    public event Action<float> Idle;
 
     #endregion
 
     #region ReadReferences
 
-    
+    public Humanoid Core => humanoid;
+
+    public Vector3 GroundNormal => groundNormal;
+    public Vector3 MoveDirection => moveDirection;
+    public Vector3 LastMoveDirection => lastMoveDirection;
+    public Vector3 WindVelocity => windVelocity;
+
+    public Rigidbody RigidBody => rigidBody;
+    public Transform RootPart => rootPart;
+    public Collider BodyCollider => bodyCollider;
+    public Transform GroundCheck => groundCheck;
+
+    public PhysicsMaterial FloorMaterial => floorMaterial;
+    public Collider FloorCollider => floorCollider;
+
+    public LayerMask Layer => layer;
+
+    public float Acceleration => acceleration;
+    public float Deceleration => deceleration;
+    public float AirAcceleration => airAcceleration;
+    public float AirDeceleration => airDeceleration;
+    public float MovementStrength => movementStrength;
+
+    public float RotationSpeed => rotationSpeed;
+
+    public float MaxSlopeAngle => maxSlopeAngle;
+    public float CheckRadius => checkRadius;
+    public float CheckDistance => checkDistance;
+    public float GroundedStickForce => groundedStickForce;
+    public float SlopeSlideAcceleration => slopeSlideAcceleration;
+    public float IgnoreGroundAfterJump => ignoreGroundAfterJump;
+
+    public float JumpHeight => jumpHeight; 
+    public float JumpCooldown => jumpCooldown;
+    public float CoyoteTime => coyoteTime;
+    public float JumpBufferTime => jumpBufferTime;
+    public float JumpCutMultiplier => jumpCutMultiplier;
+
+    public float GravityScale => gravityScale;
+    public float FallingGravityMultiplier => fallingGravityMultiplier;
+    public float LowJumpGravityMultiplier => lowJumpGravityMultiplier;
+    public float MaxFallingSpeed => maxFallingSpeed;
+    public float AirResistance => airResistance;
+    public float WindInfluence => windInfluence;
+
+    public float StepHeight => stepHeight;
+    public float StepCheckDistance => stepCheckDistance;
+    public float StepSmoothness => stepSmoothness;
+
+    public float FallStartY => fallStartY;
+    public float FallDistance => fallDistance;
+
+    public bool MomentumOnAir => momentumOnAir;
+    public bool AutoRotate => autoRotate;
+    public bool OnlyRotateByMoving => onlyRotateByMoving;
+
+    public bool EnableStepUp => enableStepUp;
+
+    public bool JumpHolding => jumpHolding;
+    public bool MotorEnabled => motorEnabled;
+
+    public bool IsGrounded => isGrounded;
+    public bool IsOnSlope => isOnSlope;
+    public bool IsSliding => isSliding;
+
+
     #endregion
 
     #region APIs
@@ -245,6 +316,81 @@ public class HumanoidMotor : MonoBehaviour
         rigidBody.linearVelocity = Vector3.zero;
         rigidBody.angularVelocity = Vector3.zero;
     }
+
+    /// <summary>
+    /// Facing Humanoid to desired direction in the world
+    /// </summary>
+    /// <param name="Direction">Direction must be Vector3</param>
+    public void FaceDirection(Vector3 Direction)
+    {
+        Vector3 direction = Direction;
+        direction.y = 0;
+
+        if (onlyRotateByMoving && direction.sqrMagnitude <= 0.001f)
+            return;
+
+        if (direction.sqrMagnitude <= 0.001f)
+            direction = humanoid.FacingDirection;
+
+        Quaternion targetRotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+
+        rigidBody.MoveRotation(Quaternion.Slerp(rigidBody.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime));
+        humanoid.FaceDirection(direction.normalized, false);
+
+        OnRotating?.Invoke(direction);
+    }
+    
+    #endregion
+
+    #region InternalHelpers
+
+    private void ApplyGroundState(bool grounded)
+    {
+        isGrounded = grounded;
+        humanoid.SetHumanoidIsGrounded(grounded);
+
+        if (!grounded)
+        {
+            floorCollider = null;
+            floorMaterial = null;
+            groundNormal = Vector3.up;
+
+            isOnSlope = false;
+            isSliding = false;
+        }
+    }
+
+    private void ApplyGroundInfo(RaycastHit result)
+    {
+        floorCollider = result.collider;
+        floorMaterial = result.collider.sharedMaterial;
+        groundNormal = result.normal;
+
+        float angle = Vector3.Angle(groundNormal, Vector3.up);
+        isOnSlope = angle > 1.0f;
+        isSliding = angle > maxSlopeAngle;
+
+        isGrounded = true;
+        lastGroundedTime = Time.time;
+
+        humanoid.SetHumanoidIsGrounded(true);
+    }
+
+    private void ApplySimpleGroundInfo()
+    {
+        floorCollider = null;
+        floorMaterial = null;
+        groundNormal = Vector3.up;
+
+        isOnSlope = false;
+        isSliding = false;
+
+        isGrounded = true;
+        lastGroundedTime = Time.time;
+
+        humanoid.SetHumanoidIsGrounded(true);
+    }
+
     #endregion
 
     #region PrivateHelpers
@@ -263,7 +409,7 @@ public class HumanoidMotor : MonoBehaviour
 
     private void HandleFallTracking()
     {
-        if (!isGrounded && rigidBody.linearVelocity.y > 0.1f)
+        if (!isGrounded && rigidBody.linearVelocity.y > 1f)
         {
             if (humanoid.StateType != HumanoidStateType.Airborne)
             {
@@ -271,6 +417,7 @@ public class HumanoidMotor : MonoBehaviour
                 humanoid.ChangeState(HumanoidStateType.Airborne);
 
                 isGrounded = false;
+                humanoid.SetHumanoidIsGrounded(false);
                 OnAirborneBegin?.Invoke();
             }
 
@@ -278,7 +425,7 @@ public class HumanoidMotor : MonoBehaviour
             OnAirborne?.Invoke();
         }
 
-        if (!isGrounded && rigidBody.linearVelocity.y < -0.1f)
+        if (!isGrounded && rigidBody.linearVelocity.y < -1f)
         {
             if (humanoid.StateType == HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling)
             {
@@ -293,11 +440,29 @@ public class HumanoidMotor : MonoBehaviour
         if (isGrounded && humanoid.StateType == HumanoidStateType.FreeFalling)
         {
             ApplyFallDamage();
-
             humanoid.ChangeState(HumanoidStateType.Grounded);
+
             isGrounded = true;
+            humanoid.SetHumanoidIsGrounded(true);
 
             Landed?.Invoke();
+        }
+
+        if (isGrounded && humanoid.StateType != HumanoidStateType.FreeFalling && humanoid.StateType != HumanoidStateType.Airborne)
+        {
+            if (targetMoveDirection.sqrMagnitude <= 0.001f)
+            {
+                humanoid.ChangeState(HumanoidStateType.Idle);
+                humanoid.SetHumanoidIsMoving(false);
+
+                if (Time.time - idleStayingTimer >= 1)
+                {
+                    idleStayingCounter += 1;
+                    idleStayingTimer = Time.time;
+                }
+
+                Idle?.Invoke(idleStayingCounter);
+            }
         }
     }
 
@@ -307,67 +472,57 @@ public class HumanoidMotor : MonoBehaviour
 
         if (Time.time < groundIgnoreTimer)
         {
-            isGrounded = false;
-            humanoid.SetHumanoidIsGrounded(false);
-            isOnSlope = false;
-            isSliding = false;
-            groundNormal = Vector3.up;
-            floorMaterial = null;
-            floorCollider = null;
-
+            ApplyGroundState(false);
             return;
         }
 
-        Vector3 origin;
+        float skin = 0.05f;
+        Vector3 multiplier = Vector3.up * (checkRadius + skin);
+        Vector3 preOrigin = groundCheck != null ?
+            groundCheck.position : rootPart.position;
 
-        if (groundCheck != null)
-            origin = groundCheck.position;
-        else
-            origin = rootPart.position + Vector3.up * 0.1f;
+        Vector3 origin = preOrigin + multiplier;
 
-        float distance = checkDistance;
-
-        bool isChecked = Physics.SphereCast(
+        RaycastHit hitInfo;
+        bool isChecked = Physics.SphereCast
+        (
             origin,
             checkRadius,
             Vector3.down,
-            out RaycastHit info,
-            distance,
+            out hitInfo,
+            checkDistance,
             layer,
             QueryTriggerInteraction.Ignore
         );
 
         if (isChecked)
-        { 
-            groundNormal = info.normal;
-            floorMaterial = info.collider.sharedMaterial;
-            floorCollider = info.collider;
-
-            float slopeAngle = Vector3.Angle(groundNormal, Vector3.up);
-            isOnSlope = slopeAngle > 1f;
-            isSliding = slopeAngle > maxSlopeAngle;
-
-            isGrounded = true;
-            lastGroundedTime = Time.time;
-
-            humanoid.SetHumanoidIsGrounded(true);
+        {
+            ApplyGroundInfo(hitInfo);
         }
         else
         {
-            groundNormal = Vector3.up;
-            isOnSlope = false;
-            isSliding = false;
-            isGrounded = false;
-            
-            groundNormal = Vector3.zero;
-            floorMaterial = null;
-            floorCollider = null;
+            isChecked = Physics.CheckSphere
+            (
+                preOrigin + Vector3.up * skin,
+                checkRadius * 0.95f,
+                layer,
+                QueryTriggerInteraction.Ignore
+            );
 
-            humanoid.SetHumanoidIsGrounded(false);
+            if (isChecked)
+            {
+                RaycastHit alternateHit;
+                bool ray = Physics.Raycast(origin, Vector3.down, out alternateHit, checkDistance + checkRadius + skin, layer, QueryTriggerInteraction.Ignore);
+
+                if (ray)
+                    ApplyGroundInfo(alternateHit);
+                else
+                    ApplySimpleGroundInfo();
+            }
         }
 
-        Debug.Log($"IsChecked: {isChecked}, Grounded: {isGrounded}, canMove: {humanoid.CanMove}, canJump: {humanoid.CanJump}, move: {moveInput}, vel: {rigidBody.linearVelocity}");
-
+        if (!isChecked)
+            ApplyGroundState(false);
 
         if (!oldGrounded && isGrounded)
             Grounded?.Invoke();
@@ -381,31 +536,28 @@ public class HumanoidMotor : MonoBehaviour
 
         targetMoveDirection = moveInput;
 
-        if (targetMoveDirection.sqrMagnitude <= 0.01f)
-        {
-            if (humanoid.StateType != HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling)
-            {
-                humanoid.ChangeState(HumanoidStateType.Idle);
-                humanoid.SetHumanoidIsMoving(false);
-            }
-        }
-
         if (isGrounded && !isSliding)
             targetMoveDirection = Vector3.ProjectOnPlane(targetMoveDirection, groundNormal).normalized;
 
+        bool onInput = targetMoveDirection.sqrMagnitude > 0.001f;
+
+        idleStayingCounter = onInput ? 0 : idleStayingCounter;
+
         float speed = runReady ? humanoid.RunningSpeed : humanoid.WalkSpeed;
-        Vector3 targetHorizontalVelocity = targetMoveDirection * speed;
-        bool onInput = targetHorizontalVelocity.sqrMagnitude > 0.001f;
+        Vector3 targetHorizontalVelocity = onInput ? targetMoveDirection * speed : Vector3.zero;
 
         float accel;
-
+        
         if (isGrounded)
             accel = onInput ? acceleration : deceleration;
         else
             accel = onInput ? airAcceleration : airDeceleration;
 
         if (!isGrounded && momentumOnAir && !onInput)
-            targetHorizontalVelocity = horizontalVelocity;
+        {
+            targetHorizontalVelocity = Vector3.zero;
+            accel = Mathf.Max(airDeceleration, deceleration * 0.35f);
+        }
 
         Vector3 newHorizontalVelocity = Vector3.MoveTowards(
             horizontalVelocity,
@@ -423,7 +575,7 @@ public class HumanoidMotor : MonoBehaviour
         if (onInput)
             lastMoveDirection = targetMoveDirection.normalized;
 
-        if (humanoid.StateType != HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling || isGrounded)
+        if (onInput && humanoid.StateType != HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling || isGrounded)
             humanoid.ChangeState(runReady ? HumanoidStateType.Running : HumanoidStateType.Walking);
 
         if (runReady)
@@ -551,19 +703,7 @@ public class HumanoidMotor : MonoBehaviour
         if (!autoRotate)
             return;
 
-        Vector3 direction = targetMoveDirection;
-        direction.y = 0;
-
-        if (onlyRotateByMoving && direction.sqrMagnitude <= 0.001f)
-            return;
-
-        if (direction.sqrMagnitude <= 0.001f)
-            direction = humanoid.FacingDirection;
-
-        Quaternion targetRotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
-
-        rigidBody.MoveRotation(Quaternion.Slerp(rigidBody.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime));
-        humanoid.FaceDirection(direction.normalized, false);
+        FaceDirection(targetMoveDirection);
     }
 
     private void UpdateHumanoidRuntime()
@@ -586,6 +726,8 @@ public class HumanoidMotor : MonoBehaviour
         rigidBody.freezeRotation = true;
         rigidBody.useGravity = false;
         rigidBody.interpolation = RigidbodyInterpolation.Interpolate;
+
+        idleStayingTimer = Time.time;
     }
 
     private void FixedUpdate()
@@ -595,13 +737,14 @@ public class HumanoidMotor : MonoBehaviour
         
         wasGrounded = isGrounded;
 
-        HandleFallTracking();
         CheckGround();
 
         HandleJump();
         HandleMovement();
-
         HandleMass();
+
+        HandleFallTracking();
+
         HandleSlopeSliding();
         HandleRotation();
         UpdateHumanoidRuntime();
