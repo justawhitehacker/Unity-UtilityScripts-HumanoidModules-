@@ -121,8 +121,6 @@ public class Humanoid : MonoBehaviour
     [SerializeField] private float fallDamageMultiplier = 10.0f;
     [SerializeField] private float walkToStoppingDistance = 0.5f;
 
-    [SerializeField] private bool letCheckGround = false;
-
     [SerializeField] private Vector3 cameraOffset = Vector3.zero;
     [SerializeField] private bool canMove = true;
     [SerializeField] private bool canJump = true;
@@ -989,7 +987,7 @@ public class Humanoid : MonoBehaviour
     /// <summary>
     /// Setting Humanoid's CanApplyFallDamage, to set access for Humanoid can take damage when fell and hit the ground
     /// </summary>
-    /// <param name="enable"></param>
+    /// <param name="enable">True/False</param>
     public void SetHumanoidCanApplyFallDamage(bool enable)
     {
         bool old = canApplyFallDamage;
@@ -1000,11 +998,9 @@ public class Humanoid : MonoBehaviour
     }
 
     /// <summary>
-    /// 
+    /// Setting Humanoid's platform stand status, that if enabled, Humanoid cannot able to do movement or jumping
     /// </summary>
-    /// <param name="amount"></param>
-
-    // Set Humanoid's platform standing
+    /// <param name="enable">True/False</param>
     public void SetHumanoidPlatformStanding(bool enable)
     {
         bool old = platformStanding;
@@ -1014,6 +1010,10 @@ public class Humanoid : MonoBehaviour
             OnPlatformStandingChanged?.Invoke(old, platformStanding);
     }
 
+    /// <summary>
+    /// Setting Humanoid's IsGrounded, that detecting the grounded status from HumanoidMotor's update
+    /// </summary>
+    /// <param name="enabled">True/False</param>
     public void SetHumanoidIsGrounded(bool enabled)
     {
         if (isGrounded == enabled)
@@ -1022,7 +1022,10 @@ public class Humanoid : MonoBehaviour
         isGrounded = enabled;
     }
 
-    // Set Humanoid's safe from fall damage distance
+    /// <summary>
+    /// Setting Humanoid's distance for safe from falling on air, that prevents Humanoid taking damage after landed to ground
+    /// </summary>
+    /// <param name="amount">Amount must be >=0</param>
     public void SetHumanoidSafeFromFallDistance(float amount)
     {
         float old = safeFromFallDistance;
@@ -1032,7 +1035,10 @@ public class Humanoid : MonoBehaviour
             OnSafeFromFallDistanceChanged?.Invoke(old, safeFromFallDistance);
     }
 
-    // Set Humanoid's fall damage multiplier
+    /// <summary>
+    /// Setting Humanoid's damage scale for falling damage when Humanoid landed on ground and taking damage
+    /// </summary>
+    /// <param name="amount">Amount must be >=1</param>
     public void SetHumanoidFallDamageMultiplier(float amount)
     {
         float old = fallDamageMultiplier;
@@ -1042,45 +1048,66 @@ public class Humanoid : MonoBehaviour
             OnFallDamageMultiplierChanged?.Invoke(old, fallDamageMultiplier);
     }
 
-    // Set Humanoid's target point
+    /// <summary>
+    /// Setting Humanoid's target point for MoveTo function
+    /// </summary>
+    /// <param name="point">Point must be Vector3</param>
     public void SetHumanoidTargetPoint(Vector3 point)
     {
         targetPoint = point;
         hasTargetPoint = true;
     }
 
-    // Clearing Humanoid's target point
+    /// <summary>
+    /// Clearing Humanoid's target point history
+    /// </summary>
     public void ClearHumanoidTargetPoint()
     {
         hasTargetPoint = false;
     }
 
     /* getters */
-    // Get Humanoid's move direction in local/relative space of this transform
+
+    /// <summary>
+    /// Returning Vector3 of move direction of the Humanoid from Local Space
+    /// </summary>
+    /// <returns>Local-Spaced Vector3 from this Transform</returns>
     public Vector3 GetLocalMoveDirection()
     {
         return transform.InverseTransformDirection(moveDirection);
     }
 
-    // Get Humanoid's move direction in world space
+    /// <summary>
+    /// Returning Vector3 of move direction of the Humanoid from Global/World Space
+    /// </summary>
+    /// <returns>Vector3 of Direction</returns>
     public Vector3 GetGlobalMoveDirection()
     {
         return moveDirection;
     }
 
-    // Get Humanoid's facing direction in world space
+    /// <summary>
+    /// Returning Vector3 of face direction of the Humanoid that updated from HumanoidMotor
+    /// </summary>
+    /// <returns>Vector3 of Face Direction</returns>
     public Vector3 GetFacingDirection()
     {
         return facingDirection;
     }
 
-    // Get amount between [1, -1] of forward movement direction from Humanoid
+    /// <summary>
+    /// Returning amount between 1 and -1 of right vector or X-Axis from the Humanoid's moving direction
+    /// </summary>
+    /// <returns>Float [1, -1]</returns>
     public float GetForwardAmount()
     {
         return Vector3.Dot(transform.forward, moveDirection);
     }
 
-    // Get amount between [1, -1] of right movement direction from Humanoid
+    /// <summary>
+    /// Returning amount between 1 and -1 of forward vetor or Z-Axis from the Humanoid's moving direction
+    /// </summary>
+    /// <returns>Float [1, -1]</returns>
     public float GetRightAmount()
     {
         return Vector3.Dot(transform.right, moveDirection);
@@ -1088,31 +1115,48 @@ public class Humanoid : MonoBehaviour
 
     /* extra methods */
 
-    // return the bool states by comparing the current status with desired status 
+    /// <summary>
+    /// Comparing if Humanoid has a conditional status
+    /// </summary>
+    /// <param name="statusName">statusName must be string</param>
+    /// <returns>True/False</returns>
     public bool HasStatus(string statusName)
     {
         return statuses.Contains(statusName);
     }
 
-    // return all statuses of Humanoid that still remaining
+    /// <summary>
+    /// Returning a list of all statuses of Humanoid
+    /// </summary>
+    /// <returns>List -> Statuses</returns>
     public List<string> GetStatuses()
     {
         return new(statuses);
     }
 
-    // return the bool states by comparing the current temporary status with desired status
+    /// <summary>
+    /// Comparing if Humanoid has a conditional temporary status
+    /// </summary>
+    /// <param name="statusName">statusName must be string</param>
+    /// <returns>True/False</returns>
     public bool HasTemporaryStatus(string statusName)
     {
         return temporaryStatuses.TryGetValue(statusName, out float end) && Time.time < end;
     }
 
-    // return all temporary statuses of Humanoid that still remaining
+    /// <summary>
+    /// Returning a list of all temporary statuses of Humanoid
+    /// </summary>
+    /// <returns>List -> Temporary Statuses</returns>
     public List<string> GetTemporaryStatuses()
     {
         return new(temporaryStatuses.Keys);
     }
 
-    // adding a new status into Humanoid
+    /// <summary>
+    /// Adding a new status into Humanoid, permanent status 
+    /// </summary>
+    /// <param name="statusName">statusName must be string</param>
     public void AddStatus(string statusName)
     {
         if (statuses.Contains(statusName)) return;
@@ -1121,14 +1165,21 @@ public class Humanoid : MonoBehaviour
         OnStatusAdded?.Invoke(statusName);
     }
 
-    // adding a new temporary status into Humanoid
+    /// <summary>
+    /// Adding a new temporary status into Humanoid, that the status will be removed from Humanoid when timed out
+    /// </summary>
+    /// <param name="statusName">statusName must be string</param>
+    /// <param name="timeout">timeout must be float</param>
     public void AddTemporaryStatus(string statusName, float timeout)
     {
         temporaryStatuses[statusName] = Time.time + timeout;
         OnTemporaryStatusAddedOrChanged?.Invoke(statusName, timeout);
     }
 
-    // removing an available status from the Humanoid
+    /// <summary>
+    /// Removing the permanent status from Humanoid
+    /// </summary>
+    /// <param name="statusName">statusName must be string</param>
     public void RemoveStatus(string statusName)
     {
         if (statuses.Contains(statusName))
@@ -1138,7 +1189,10 @@ public class Humanoid : MonoBehaviour
         }
     }
 
-    // removing an available temporary status from the Humanoid
+    /// <summary>
+    /// Removing the temporary status from Humanoid
+    /// </summary>
+    /// <param name="statusName">statusName must be string</param>
     public void RemoveTemporaryStatus(string statusName)
     {
         if (temporaryStatuses.ContainsKey(statusName))
@@ -1148,7 +1202,11 @@ public class Humanoid : MonoBehaviour
         }
     }
 
-    // changing an available status from the Humanoid to another desired status
+    /// <summary>
+    /// Replacing a remained permanent status from Humanoid with newer status
+    /// </summary>
+    /// <param name="fromStatus">fromStatus must be remained status</param>
+    /// <param name="toStatus">toStatus must be new status</param>
     public void ChangeStatus(string fromStatus, string toStatus)
     {
         if (!statuses.Contains(fromStatus) || statuses.Contains(toStatus))
@@ -1162,7 +1220,12 @@ public class Humanoid : MonoBehaviour
     #endregion
 
     #region API
-
+    
+    /// <summary>
+    /// Setting the face direction of Humanoid to desired vector direction
+    /// </summary>
+    /// <param name="direction">Direction must be Vector3</param>
+    /// <param name="rotate">True/False that affects for Humanoid to rotate or not</param>
     public void FaceDirection(Vector3 direction, bool rotate)
     {
         if (direction.sqrMagnitude <= 0.001f)
