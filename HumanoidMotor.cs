@@ -1,6 +1,10 @@
 using System;
 using UnityEngine;
 
+// yang liat kode ini, pacarnya monyet bekantan
+
+//asu
+
 [Serializable] [RequireComponent(typeof(Humanoid))] [RequireComponent(typeof(Rigidbody))] [RequireComponent(typeof(Collider))]
 public class HumanoidMotor : MonoBehaviour
 {
