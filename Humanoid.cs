@@ -115,24 +115,18 @@ public class Humanoid : MonoBehaviour
     [SerializeField] private Vector3 lastMoveDirection = Vector3.forward;
     [SerializeField] private Vector3 facingDirection = Vector3.forward;
 
-    [Header("Physics")]
-    [SerializeField] private float airControl = 0.45f;
-    [SerializeField] private float maxSlopeAngle = 45.0f;
-    [SerializeField] private bool platformStanding = false;
-
     [Header("Details")]
     [SerializeField] private bool canApplyFallDamage = true;
     [SerializeField] private float safeFromFallDistance = 3.5f;
     [SerializeField] private float fallDamageMultiplier = 10.0f;
     [SerializeField] private float walkToStoppingDistance = 0.5f;
-    [SerializeField] private float toGroundHeight = 1.5f;
 
     [SerializeField] private bool letCheckGround = false;
 
     [SerializeField] private Vector3 cameraOffset = Vector3.zero;
     [SerializeField] private bool canMove = true;
     [SerializeField] private bool canJump = true;
-    [SerializeField] private bool autoRotate = false;
+    [SerializeField] private bool platformStanding = false;
 
     [Header("Max Attributes")]
     [SerializeField] private float maxHealth = 100;
@@ -162,7 +156,6 @@ public class Humanoid : MonoBehaviour
     [SerializeField] private float runningSpeed;
     [SerializeField] private float jumpPower;
     [SerializeField] private float stamina;
-    [SerializeField] private Vector3 groundNormal;
 
     #endregion
 
@@ -172,7 +165,6 @@ public class Humanoid : MonoBehaviour
     private bool isAlive;
     private bool isGrounded;
     private bool isMoving;
-    private float fallDistance;
     private bool isJumping = false;
     private bool hasTargetPoint = false;
 
@@ -185,7 +177,6 @@ public class Humanoid : MonoBehaviour
     /* physics */
     private Collider floorCollider;
     private PhysicsMaterial floorMaterial;
-    private float fallStartY;
     private Vector3 moveDirection;
 
     /* timers */
@@ -225,21 +216,13 @@ public class Humanoid : MonoBehaviour
     public Rigidbody RigidBody => rigidBody; // 
     public Transform RootPart => rootPart;
     public Collider BodyCollider => bodyCollider;
-    public float AirControl => airControl;
-    public float MaxSlopeAngle => maxSlopeAngle;
     public float WalkToStoppingDistance => walkToStoppingDistance;
-    public Vector3 GroundNormal => groundNormal;
     public Collider FloorCollider => floorCollider;
     public PhysicsMaterial FloorMaterial => floorMaterial;
     public float LastGroundedTime => lastGroundedTime;
     public Vector3 TargetPoint => targetPoint;
-    public float FallStartY => fallStartY;
-    public float FallDistance => fallDistance;
     public float SafeFromFallDistance => safeFromFallDistance;
     public float FallDamageMultiplier => fallDamageMultiplier;
-    public float ToGroundHeight => toGroundHeight;
-    public bool IsOnSlope => Vector3.Angle(groundNormal, Vector3.up) > 1f;
-    public float CurrentSlopeAngle => Vector3.Angle(groundNormal, Vector3.up);
 
     /* References [References = MaxReferences]                         *
      * If [References > MaxReferences] then References = MaxReferences */
@@ -265,7 +248,6 @@ public class Humanoid : MonoBehaviour
     public bool PlatformStanding => platformStanding;
     public bool CanMove => canMove && !platformStanding && isAlive && movementLockCount <= 0;
     public bool CanJump => canJump && isGrounded && stateType != HumanoidStateType.Airborne && stateType != HumanoidStateType.FreeFalling && !platformStanding && isAlive && jumpLockCount <= 0;
-    public bool AutoRotate => autoRotate;
     public bool IsJumping => isJumping;
     public bool CanApplyFallDamage => canApplyFallDamage;
     public bool HealthRegenerationEnabled => healthRegenerationEnabled;
@@ -281,23 +263,13 @@ public class Humanoid : MonoBehaviour
     #region Actions
     /* Callbacks */
     public event Action Died;
-    public event Action Grounded;
-    public event Action Landed;
     public event Action Revived;
 
-    public event Action OnJumping;
-    public event Action OnAirborne;
-    public event Action OnAirborneBegin;
-    public event Action OnFreeFalling;
-    public event Action OnFreeFallingBegin;
     public event Action OnHealthRegenerationEnabledChanged;
     public event Action OnStaminaRegenerationEnabledChanged;
 
     public event Action<float> Damaged;
     public event Action<float> Healed;
-
-    public event Action<Vector3> OnRunning;
-    public event Action<Vector3> OnWalking;
 
     public event Action<string> OnStatusAdded;
     public event Action<string> OnStatusRemoved;
@@ -324,10 +296,8 @@ public class Humanoid : MonoBehaviour
     public event Action<float, float> OnStaminaRegenerationAmountChanged;
     public event Action<float, float> OnStaminaRegenerationTickChanged;
     public event Action<float, float> OnStaminaRegenerationDelayChanged;
-    public event Action<float, float> OnAirControlChanged;
-    public event Action<float, float> OnMaxSlopeAngleChanged;
-    public event Action<float, float> OnSafeFromFallDistance;
     public event Action<float, float> OnFallDamageMultiplierChanged;
+    public event Action<float, float> OnSafeFromFallDistanceChanged;
     public event Action<float, float> OnWalkToStoppingDistanceChanged;
 
     public event Action<Vector3, Vector3> OnCameraOffsetChanged;
@@ -337,7 +307,6 @@ public class Humanoid : MonoBehaviour
     public event Action<HumanoidStateType, HumanoidStateType> OnStateChanged;
     public event Action<HumanoidOwnerType, HumanoidOwnerType> OnOwnerChanged;
 
-    public event Action<bool, bool> OnAutoRotateChanged;
     public event Action<bool, bool> OnCanApplyFallDamageChanged;
     public event Action<bool, bool> OnPlatformStandingChanged;
     public event Action<bool, bool> OnCanMoveChanged;
@@ -399,89 +368,6 @@ public class Humanoid : MonoBehaviour
             SetHumanoidStamina(stamina + staminaRegenerationAmount);
             staminaRegenTimer = 0;
         }
-    }
-
-    private void HandleFallTracking()
-    {
-        if (!isGrounded && linearVelocity.y > 0.1f)
-        {
-            if (stateType != HumanoidStateType.Airborne)
-            {
-                fallStartY = rootPart.position.y;
-                ChangeState(HumanoidStateType.Airborne);
-
-                isGrounded = false;
-                OnAirborneBegin?.Invoke();
-            }
-
-            fallDistance = rootPart.position.y - fallStartY;
-            OnAirborne?.Invoke();
-        }
-
-        if (!isGrounded && linearVelocity.y < -0.1f)
-        {
-            if (stateType == HumanoidStateType.Airborne && stateType != HumanoidStateType.FreeFalling)
-            {
-                ChangeState(HumanoidStateType.FreeFalling);
-
-                OnFreeFallingBegin?.Invoke();
-            }
-
-            OnFreeFalling?.Invoke();
-        }
-
-        if (isGrounded && stateType == HumanoidStateType.FreeFalling)
-        {
-            ApplyFallDamage();
-
-            ChangeState(HumanoidStateType.Grounded);
-            isGrounded = true;
-
-            Landed?.Invoke();
-        }
-    }
-    
-    private void HandleFloorInfo()
-    {
-        if (!letCheckGround) return;
-
-        bool oldGrounded = isGrounded;
-
-        if (Physics.Raycast(rootPart.position, Vector3.down, out RaycastHit info, toGroundHeight))
-        {
-            floorCollider = info.collider;
-            floorMaterial = info.collider.sharedMaterial;
-            groundNormal = info.normal;
-            
-            float slopeAngle = Vector3.Angle(info.normal, Vector3.up);
-            isGrounded = slopeAngle <= maxSlopeAngle;
-        }
-        else
-        {
-            floorCollider = null;
-            floorMaterial = null;
-            groundNormal = Vector3.up;
-
-            isGrounded = false;
-        }
-
-        if (!oldGrounded && isGrounded)
-        {
-            isJumping = false;
-            Grounded?.Invoke();
-        }
-    }
-
-    private void ApplyFallDamage()
-    {
-        if (!canApplyFallDamage || !isAlive)
-            return;
-        
-        if (safeFromFallDistance >= fallDistance)
-            return;
-
-        float totalDamage = (fallDistance - safeFromFallDistance) * fallDamageMultiplier;
-        TakeDamage(totalDamage);
     }
 
     private void HandleTemporaryStatus()
@@ -596,46 +482,6 @@ public class Humanoid : MonoBehaviour
 
         ChangeState(HumanoidStateType.Died);
         Died?.Invoke();
-    }
-
-    /// <summary>
-    /// Moving Humanoid to desired location with no running condition
-    /// </summary>
-    /// <param name="Location">Location must be Vector3</param>
-    /// <returns>True/False</returns>
-    public bool MoveTo(Vector3 Location)
-    {
-        return MoveTo(Location, false);
-    }
-
-    /// <summary>
-    /// Moving Humanoid to desired location with optional running condition or not
-    /// </summary>
-    /// <param name="Location">Location must be Vector3</param>
-    /// <param name="Running">Will Humanoid run or not? (True/False)</param>
-    /// <returns>True/False</returns>
-    public bool MoveTo(Vector3 Location, bool Running)
-    {
-        if (!CanMove)
-            return false;
-
-        SetHumanoidTargetPoint(Location);
-
-        Vector3 distance = Location - rootPart.position;
-        distance.y = 0;
-
-        float stoppingDistance2 = walkToStoppingDistance * walkToStoppingDistance;
-
-        if (distance.sqrMagnitude <= stoppingDistance2)
-        {
-            ClearHumanoidTargetPoint();
-            StopMovement();
-
-            return true;
-        }
-
-        Move(distance.normalized, Running);
-        return true;
     }
 
     /// <summary>
@@ -1141,42 +987,6 @@ public class Humanoid : MonoBehaviour
     }
 
     /// <summary>
-    /// Setting Humanoid's ToGroundHeight, that give distance of center of Humanoid's RootPart towards ground to check
-    /// </summary>
-    /// <param name="amount">Amount must be >=0</param>
-    public void SetHumanoidToGroundHeight(float amount)
-    {
-        amount = Mathf.Max(0, amount);
-        toGroundHeight = amount;
-    }
-
-    /// <summary>
-    /// Setting Humanoid's AirControl, that gives scale of air control for Humanoid to walk on air
-    /// </summary>
-    /// <param name="amount">Amount must between 0 - 1</param>
-    public void SetHumanoidAirControl(float amount)
-    {
-        float old = airControl;
-        airControl = Mathf.Clamp01(amount);
-
-        if (old != airControl)
-            OnAirControlChanged?.Invoke(old, airControl);
-    }
-
-    /// <summary>
-    /// Setting Humanoid's AutoRotate, that let the transform of this Humanoid rotates towards the direction of current movement
-    /// </summary>
-    /// <param name="enable">True/False</param>
-    public void SetHumanoidAutoRotate(bool enable)
-    {
-        bool old = autoRotate;
-        autoRotate = enable;
-
-        if (old != autoRotate)
-            OnAutoRotateChanged?.Invoke(old, autoRotate);
-    }
-
-    /// <summary>
     /// Setting Humanoid's CanApplyFallDamage, to set access for Humanoid can take damage when fell and hit the ground
     /// </summary>
     /// <param name="enable"></param>
@@ -1193,14 +1003,6 @@ public class Humanoid : MonoBehaviour
     /// 
     /// </summary>
     /// <param name="amount"></param>
-    public void SetHumanoidMaxSlopeAngle(float amount)
-    {
-        float old = maxSlopeAngle;
-        maxSlopeAngle = Mathf.Clamp(amount, 0, 89);
-
-        if (old != maxSlopeAngle)
-            OnMaxSlopeAngleChanged?.Invoke(old, maxSlopeAngle);
-    }
 
     // Set Humanoid's platform standing
     public void SetHumanoidPlatformStanding(bool enable)
@@ -1227,7 +1029,7 @@ public class Humanoid : MonoBehaviour
         safeFromFallDistance = Mathf.Max(0, amount);
 
         if (old != safeFromFallDistance)
-            OnSafeFromFallDistance?.Invoke(old, safeFromFallDistance);
+            OnSafeFromFallDistanceChanged?.Invoke(old, safeFromFallDistance);
     }
 
     // Set Humanoid's fall damage multiplier
@@ -1360,92 +1162,6 @@ public class Humanoid : MonoBehaviour
     #endregion
 
     #region API
-    public void Move(Vector3 Direction, bool Running)
-    {
-        if (!CanMove)
-            return;
-
-        Vector3 direction = Direction;
-
-        if (direction.sqrMagnitude <= 0.001f)
-        {
-            if (stateType != HumanoidStateType.Airborne && stateType != HumanoidStateType.FreeFalling)
-                ChangeState(HumanoidStateType.Idle);
-            
-            isMoving = false;
-
-            return;
-        }
-
-        if (Direction.sqrMagnitude > 0.01f)
-            direction.Normalize();
-        else
-            direction = Vector3.zero;
-
-        bool canRun = Running && stamina > staminaDecrementTick;
-
-        float control = isGrounded ? 1f : airControl;
-        float speed = canRun ? runningSpeed : walkSpeed;
-
-        direction = Vector3.ClampMagnitude(direction, 1.0f);
-        Vector3 velocity = direction * speed * airControl;
-
-        velocity.y = rigidBody.linearVelocity.y;
-        rigidBody.linearVelocity = velocity;
-
-        FaceDirection(direction, autoRotate);
-
-        isMoving = true;
-
-        if (direction.sqrMagnitude > 0.001f)
-        {
-            moveDirection = direction.normalized;
-            lastMoveDirection = moveDirection;
-        }
-        else
-        {
-            moveDirection = Vector3.zero;
-        }
-
-        if (stateType != HumanoidStateType.Airborne && stateType != HumanoidStateType.FreeFalling && isGrounded)
-            ChangeState(canRun ? HumanoidStateType.Running : HumanoidStateType.Walking);
-
-        if (canRun)
-        {
-            staminaUsedTimer += Time.deltaTime;
-
-            if (staminaUsedTimer >= staminaDecrementTick)
-            {
-                bool isSuccess = TryUsingStamina(staminaDecrementAmount);
-                staminaUsedTimer = 0;
-
-                if (!isSuccess)
-                    Running = false;
-            }
-            OnRunning?.Invoke(direction);
-        }
-        else
-        {
-            OnWalking?.Invoke(direction);
-        }
-    }
-
-    public void Jump()
-    {
-        if (!CanJump)
-            return;
-
-        isJumping = true;
-
-        Vector3 velocity = rigidBody.linearVelocity;
-        velocity.y = 0;
-        rigidBody.linearVelocity = velocity;
-
-        rigidBody.AddForce(Vector3.up * jumpPower, ForceMode.Impulse);
-
-        ChangeState(HumanoidStateType.Jumping);
-        OnJumping?.Invoke();
-    }
 
     public void FaceDirection(Vector3 direction, bool rotate)
     {
@@ -1496,16 +1212,6 @@ public class Humanoid : MonoBehaviour
 
         // status
         HandleTemporaryStatus();
-    }
-
-    private void FixedUpdate()
-    {
-        // character physics
-        HandleFallTracking();
-        HandleFloorInfo();
-
-        linearVelocity = rigidBody.linearVelocity;
-        angularVelocity = rigidBody.angularVelocity;
     }
     
     private void OnValidate()
