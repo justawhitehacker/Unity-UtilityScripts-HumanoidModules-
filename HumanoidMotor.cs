@@ -31,6 +31,7 @@ public class HumanoidMotor : MonoBehaviour
 
     [Header("Ground")]
     [SerializeField] private LayerMask layer;
+    [SerializeField] private float maxSlopeAngle = 45.0f;
     [SerializeField] private float checkRadius = 0.35f;
     [SerializeField] private float checkDistance = 0.65f;
     [SerializeField] private float groundedStickForce = 8.0f;
@@ -82,6 +83,9 @@ public class HumanoidMotor : MonoBehaviour
     private bool isOnSlope;
     private bool isSliding;
 
+    private float fallStartY;
+    private float fallDistance;
+
     private float lastGroundedTime;
     private float lastJumpRequestTime;
     private float lastJumpTime;
@@ -93,8 +97,14 @@ public class HumanoidMotor : MonoBehaviour
     #region Events
 
     public event Action Grounded;
+    public event Action Landed;
     public event Action Sliding;
+    
+    public event Action OnAirborneBegin;
+    public event Action OnFreeFallingBegin;
 
+    public event Action OnAirborne;
+    public event Action OnFreeFalling;
     public event Action OnJumping;
 
     public event Action<Vector3> OnWalking;
@@ -104,6 +114,7 @@ public class HumanoidMotor : MonoBehaviour
 
     #region ReadReferences
 
+    
     #endregion
 
     #region APIs
@@ -139,6 +150,47 @@ public class HumanoidMotor : MonoBehaviour
     {
         moveInput = Vector3.zero;
         runReady = false;
+    }
+
+     /// <summary>
+    /// Moving Humanoid to desired location with no running condition
+    /// </summary>
+    /// <param name="Location">Location must be Vector3</param>
+    /// <returns>True/False</returns>
+    public bool MoveTo(Vector3 Location)
+    {
+        return MoveTo(Location, false);
+    }
+
+    /// <summary>
+    /// Moving Humanoid to desired location with optional running condition or not
+    /// </summary>
+    /// <param name="Location">Location must be Vector3</param>
+    /// <param name="Running">Will Humanoid run or not? (True/False)</param>
+    /// <returns>True/False</returns>
+    public bool MoveTo(Vector3 Location, bool Running)
+    {
+        if (!humanoid.CanMove)
+            return false;
+
+        humanoid.SetHumanoidTargetPoint(Location);
+
+        Vector3 distance = Location - rootPart.position;
+        distance.y = 0;
+
+        float stoppingDistance2 = humanoid.WalkToStoppingDistance;
+        stoppingDistance2 *= humanoid.WalkToStoppingDistance;
+
+        if (distance.sqrMagnitude <= stoppingDistance2)
+        {
+            humanoid.ClearHumanoidTargetPoint();
+            humanoid.StopMovement();
+
+            return true;
+        }
+
+        Move(distance.normalized, Running);
+        return true;
     }
 
     /// <summary>
@@ -197,6 +249,58 @@ public class HumanoidMotor : MonoBehaviour
 
     #region PrivateHelpers
 
+    private void ApplyFallDamage()
+    {
+        if (!humanoid.CanApplyFallDamage || !humanoid.IsAlive)
+            return;
+        
+        if (humanoid.SafeFromFallDistance >= fallDistance)
+            return;
+
+        float totalDamage = (fallDistance - humanoid.SafeFromFallDistance) * humanoid.FallDamageMultiplier;
+        humanoid.TakeDamage(totalDamage);
+    }
+
+    private void HandleFallTracking()
+    {
+        if (!isGrounded && rigidBody.linearVelocity.y > 0.1f)
+        {
+            if (humanoid.StateType != HumanoidStateType.Airborne)
+            {
+                fallStartY = rootPart.position.y;
+                humanoid.ChangeState(HumanoidStateType.Airborne);
+
+                isGrounded = false;
+                OnAirborneBegin?.Invoke();
+            }
+
+            fallDistance = rootPart.position.y - fallStartY;
+            OnAirborne?.Invoke();
+        }
+
+        if (!isGrounded && rigidBody.linearVelocity.y < -0.1f)
+        {
+            if (humanoid.StateType == HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling)
+            {
+                humanoid.ChangeState(HumanoidStateType.FreeFalling);
+
+                OnFreeFallingBegin?.Invoke();
+            }
+
+            OnFreeFalling?.Invoke();
+        }
+
+        if (isGrounded && humanoid.StateType == HumanoidStateType.FreeFalling)
+        {
+            ApplyFallDamage();
+
+            humanoid.ChangeState(HumanoidStateType.Grounded);
+            isGrounded = true;
+
+            Landed?.Invoke();
+        }
+    }
+
     private void CheckGround()
     {
         bool oldGrounded = isGrounded;
@@ -241,7 +345,7 @@ public class HumanoidMotor : MonoBehaviour
 
             float slopeAngle = Vector3.Angle(groundNormal, Vector3.up);
             isOnSlope = slopeAngle > 1f;
-            isSliding = slopeAngle > humanoid.MaxSlopeAngle;
+            isSliding = slopeAngle > maxSlopeAngle;
 
             isGrounded = true;
             lastGroundedTime = Time.time;
@@ -491,6 +595,7 @@ public class HumanoidMotor : MonoBehaviour
         
         wasGrounded = isGrounded;
 
+        HandleFallTracking();
         CheckGround();
 
         HandleJump();
