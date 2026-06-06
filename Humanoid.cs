@@ -20,8 +20,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Security;
-using UnityEditor;
 using UnityEngine;
 
 /// <summary>
@@ -30,15 +28,15 @@ using UnityEngine;
 [Serializable] public enum HumanoidStateType 
 { 
     /// <summary>
-    /// Humanoid is Running, duality condition with Walking
+    /// Humanoid is Running, duality condition with Walking, happened when Humanoid is on walking with running enabled from Motor
     /// </summary>
     Running, 
     /// <summary>
-    /// Humanoid is Walking, duality condition with Running
+    /// Humanoid is Walking, duality condition with Running, happened when Humanoid is on walking with no running enabled from Motor
     /// </summary>
     Walking,
     /// <summary>
-    /// Humanoid is Jumping, happened when Humanoid is used Jump()
+    /// Humanoid is Jumping, happened when Humanoid is using Jump() from Motor
     /// </summary> 
     Jumping,
     /// <summary>
@@ -65,6 +63,14 @@ using UnityEngine;
     /// Humanoid is getting slid, happened when Humanoid is on the slope that surpass the limit of max slope angle from this Humanoid
     /// </summary>
     Sliding,
+    /// <summary>
+    /// Humanoid is crouching, happened when Humanoid is using Crouched() from Motor
+    /// </summary>
+    Crouch,
+    /// <summary>
+    /// Humanoid is on prone, happened when Humanoid is using Prone() from Motor
+    /// </summary>
+    Prone,
     /// <summary>
     /// Humanoid is not in written state, there is no conceptual state of the Humanoid
     /// </summary>
@@ -124,6 +130,8 @@ public class Humanoid : MonoBehaviour
     [SerializeField] private Vector3 cameraOffset = Vector3.zero;
     [SerializeField] private bool canMove = true;
     [SerializeField] private bool canJump = true;
+    [SerializeField] private bool canCrouch = true;
+    [SerializeField] private bool canProne = true;
     [SerializeField] private bool platformStanding = false;
 
     [Header("Max Attributes")]
@@ -185,9 +193,6 @@ public class Humanoid : MonoBehaviour
     private float lastDamagedTime;
     private float healthRegenTimer;
 
-    private int movementLockCount;
-    private int jumpLockCount;
-
     private float EPS_TIMER = 0.05f;
     #endregion
 
@@ -244,8 +249,10 @@ public class Humanoid : MonoBehaviour
     public bool IsGrounded => isGrounded;
     public bool IsMoving => isMoving;
     public bool PlatformStanding => platformStanding;
-    public bool CanMove => canMove && !platformStanding && isAlive && movementLockCount <= 0;
-    public bool CanJump => canJump && isGrounded && stateType != HumanoidStateType.Airborne && stateType != HumanoidStateType.FreeFalling && !platformStanding && isAlive && jumpLockCount <= 0;
+    public bool CanMove => canMove;
+    public bool CanJump => canJump;
+    public bool CanCrouch => canCrouch;
+    public bool CanProne => canProne;
     public bool IsJumping => isJumping;
     public bool CanApplyFallDamage => canApplyFallDamage;
     public bool HealthRegenerationEnabled => healthRegenerationEnabled;
@@ -748,6 +755,11 @@ public class Humanoid : MonoBehaviour
         isMoving = enabled;
     }
 
+    public void SetHumanoidIsJumping(bool enabled)
+    {
+        isJumping = enabled;
+    }
+
     /// <summary>
     /// Changing Humanoid's current state to desired state
     /// </summary>
@@ -833,39 +845,6 @@ public class Humanoid : MonoBehaviour
     public bool IsInState(HumanoidStateType type)
     {
         return stateType == type;
-    }
-
-    
-    /// <summary>
-    /// Locking current movement of Humanoid
-    /// </summary>
-    public void LockMovement()
-    {
-        movementLockCount++;
-    }
-
-    /// <summary>
-    /// Unlocking the current movement of Humanoid
-    /// </summary>
-    public void UnlockMovement()
-    {
-        movementLockCount = Mathf.Max(0, movementLockCount - 1);
-    }
-
-    /// <summary>
-    /// Locking jump condition of Humanoid
-    /// </summary>
-    public void LockJump()
-    {
-        jumpLockCount++;
-    }
-
-    /// <summary>
-    /// Unlocking the jump condition of Humanoid
-    /// </summary>
-    public void UnlockJump()
-    {
-        jumpLockCount = Mathf.Max(0, jumpLockCount - 1);
     }
 
     /* max properties */
