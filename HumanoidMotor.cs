@@ -1,10 +1,6 @@
 using System;
 using UnityEngine;
 
-// yang liat kode ini, pacarnya monyet bekantan
-
-//asu
-
 [Serializable] [RequireComponent(typeof(Humanoid))] [RequireComponent(typeof(Rigidbody))] [RequireComponent(typeof(Collider))]
 public class HumanoidMotor : MonoBehaviour
 {
@@ -49,6 +45,13 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private float jumpBufferTime = 0.15f;
     [SerializeField] private float jumpCutMultiplier = 0.5f;
 
+    [Header("Crouch")]
+    [SerializeField] private bool canAutomaticCrouch = false;
+    [SerializeField] private Transform headChecker;
+    [SerializeField] private float bodyHeight = 2;
+    [SerializeField] private float crouchHeight = 1;
+    [SerializeField] private bool invertCrouch = true;
+
     [Header("Mass")]
     [SerializeField] private float gravityScale = 1.0f;
     [SerializeField] private float fallingGravityMultiplier = 1.8f;
@@ -74,13 +77,20 @@ public class HumanoidMotor : MonoBehaviour
     private Vector3 moveDirection;
     private Vector3 lastMoveDirection;
 
+    private Vector3 standingCenter;
+
     private PhysicsMaterial floorMaterial;
     private Collider floorCollider;
 
     private bool runReady;
     private bool jumpRequested;
+    private bool setCrouching;
+    private bool setProne;
     private bool jumpHolding;
     private bool motorEnabled = true;
+
+    private bool crouched = false;
+    private bool proned = false;
 
     private bool isGrounded;
     private bool wasGrounded;
@@ -93,11 +103,21 @@ public class HumanoidMotor : MonoBehaviour
     private float lastGroundedTime;
     private float lastJumpRequestTime;
     private float lastJumpTime;
+    private float lastCrouchTime;
+    private float lastProneTime;
     private float staminaUsedTimer;
     private float groundIgnoreTimer;
     private float idleStayingTimer;
 
     private float idleStayingCounter;
+
+    private int movementLockCount;
+    private int jumpLockCount;
+
+    private bool canMove;
+    private bool canJump;
+    private bool canCrouch;
+    private bool canProne;
 
     #endregion
 
@@ -106,7 +126,14 @@ public class HumanoidMotor : MonoBehaviour
     public event Action Grounded;
     public event Action Landed;
     public event Action Sliding;
+    public event Action UnCrouched;
+    public event Action UnProned;
+
+    public event Action Crouching;
+    public event Action Proning;
     
+    public event Action OnCrouchBegin;
+    public event Action OnProneBegin;
     public event Action OnAirborneBegin;
     public event Action OnFreeFallingBegin;
 
@@ -119,7 +146,7 @@ public class HumanoidMotor : MonoBehaviour
     public event Action<Vector3> OnRotating;
 
     public event Action<float> Idle;
-
+ 
     #endregion
 
     #region ReadReferences
@@ -201,7 +228,7 @@ public class HumanoidMotor : MonoBehaviour
     /// <param name="Running">True/False for running</param>
     public void Move(Vector3 Direction, bool Running)
     {
-        if (!motorEnabled || !humanoid.IsAlive || !humanoid.CanMove)
+        if (!motorEnabled || !canMove)
             return;
 
         Vector3 dir = Direction;
@@ -245,7 +272,7 @@ public class HumanoidMotor : MonoBehaviour
     /// <returns>True/False</returns>
     public bool MoveTo(Vector3 Location, bool Running)
     {
-        if (!humanoid.CanMove)
+        if (!canMove)
             return false;
 
         humanoid.SetHumanoidTargetPoint(Location);
@@ -273,7 +300,7 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void Jump()
     {
-        if (!motorEnabled || !humanoid.IsAlive || !humanoid.CanJump)
+        if (!motorEnabled || !canJump)
             return;
 
         jumpRequested = true;
@@ -287,6 +314,26 @@ public class HumanoidMotor : MonoBehaviour
     public void StopJumping()
     {
         jumpHolding = false;
+    }
+    
+    /// <summary>
+    /// Setting Humanoid's collider to relative crouching height
+    /// </summary>
+    public void Crouch()
+    {
+        if (!motorEnabled || !canCrouch)
+            return;
+
+        setCrouching = true;
+        lastCrouchTime = Time.time;
+    }
+
+    /// <summary>
+    /// Stopping the crouch session of Humanoid
+    /// </summary>
+    public void UnCrouch()
+    {
+        setCrouching = false;
     }
 
     /// <summary>
@@ -322,6 +369,38 @@ public class HumanoidMotor : MonoBehaviour
     }
 
     /// <summary>
+    /// Locking current movement of Humanoid
+    /// </summary>
+    public void LockMovement()
+    {
+        movementLockCount++;
+    }
+
+    /// <summary>
+    /// Unlocking the current movement of Humanoid
+    /// </summary>
+    public void UnlockMovement()
+    {
+        movementLockCount = Mathf.Max(0, movementLockCount - 1);
+    }
+
+    /// <summary>
+    /// Locking jump condition of Humanoid
+    /// </summary>
+    public void LockJump()
+    {
+        jumpLockCount++;
+    }
+
+    /// <summary>
+    /// Unlocking the jump condition of Humanoid
+    /// </summary>
+    public void UnlockJump()
+    {
+        jumpLockCount = Mathf.Max(0, jumpLockCount - 1);
+    }
+
+    /// <summary>
     /// Facing Humanoid to desired direction in the world
     /// </summary>
     /// <param name="Direction">Direction must be Vector3</param>
@@ -347,6 +426,85 @@ public class HumanoidMotor : MonoBehaviour
     #endregion
 
     #region InternalHelpers
+
+    private Vector3 GetCapsuleColliderDirection(CapsuleCollider capsule)
+    {
+        return capsule.direction switch
+        {
+            0 => Vector3.right,
+            1 => Vector3.up,
+            2 => Vector3.forward,
+            _ => Vector3.up
+        };
+    }
+
+    private bool TryCrouch(Collider collider, float halfHeight)
+    {
+        switch (collider)
+        {
+            case CapsuleCollider capsule:
+                capsule.height = halfHeight;
+                halfHeight = halfHeight * 0.5f;
+
+                capsule.center = new Vector3(capsule.center.x, invertCrouch ? -halfHeight : halfHeight, capsule.center.z);
+            //    Vector3 direction = GetCapsuleColliderDirection(capsule);
+            //    halfHeight = standingHeight - halfHeight;
+               
+            //    standingCenter = capsule.center;
+               
+            //    Vector3 center = standingCenter - direction * (halfHeight / 2);
+            //    capsule.center = new Vector3(capsule.center.x, center.y, capsule.center.z);
+               return true;
+
+            
+            case BoxCollider box:
+                box.size = new Vector3(box.size.x, halfHeight, box.size.z);
+                halfHeight = halfHeight / 2;
+                 
+                standingCenter = box.center;
+                box.center = new Vector3(box.center.x, halfHeight, box.center.z);
+                return true;
+
+            case SphereCollider sphere:
+                sphere.radius = halfHeight;
+                halfHeight = halfHeight / 2;
+                
+                standingCenter = sphere.center;
+                sphere.center = new Vector3(sphere.center.x, halfHeight, sphere.center.z);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    private bool TryUncrouch(Collider collider, float standingHeight)
+    {
+        switch (collider)
+        {
+            case CapsuleCollider capsule:
+               capsule.height = standingHeight;
+                              
+               capsule.center = standingCenter;
+               return true;
+
+            
+            case BoxCollider box:
+                box.size = new Vector3(box.size.x, standingHeight, box.size.z);
+                
+                box.center = standingCenter;
+                return true;
+
+            case SphereCollider sphere:
+                sphere.radius = standingHeight;
+
+                sphere.center = standingCenter;
+                return true;
+
+            default:
+                return false;
+        }
+    }
 
     private void ApplyGroundState(bool grounded)
     {
@@ -411,6 +569,29 @@ public class HumanoidMotor : MonoBehaviour
         humanoid.TakeDamage(totalDamage);
     }
 
+    private void HandleCrouching()
+    {
+        if (setCrouching)
+        {
+            bool crouch = TryCrouch(bodyCollider, crouchHeight);
+
+            if (crouch && !crouched)
+                OnCrouchBegin?.Invoke();
+
+            crouched = true;
+            Crouching?.Invoke();
+        }
+        else
+        {
+            bool uncrouch = TryUncrouch(bodyCollider, bodyHeight);
+
+            if (uncrouch && crouched)
+                UnCrouched?.Invoke();
+            
+            crouched = false;
+        }
+    }
+
     private void HandleFallTracking()
     {
         if (!isGrounded && rigidBody.linearVelocity.y > 1f)
@@ -450,6 +631,11 @@ public class HumanoidMotor : MonoBehaviour
             humanoid.SetHumanoidIsGrounded(true);
 
             Landed?.Invoke();
+        }
+
+        if (isGrounded && (humanoid.IsJumping || humanoid.StateType == HumanoidStateType.Jumping))
+        {
+            humanoid.SetHumanoidIsJumping(false);
         }
 
         if (isGrounded && humanoid.StateType != HumanoidStateType.FreeFalling && humanoid.StateType != HumanoidStateType.Airborne)
@@ -621,6 +807,8 @@ public class HumanoidMotor : MonoBehaviour
 
         Vector3 velocity = new Vector3(rigidBody.linearVelocity.x, 0, rigidBody.linearVelocity.z);
         velocity.y += jumpVelocity;
+        
+        humanoid.SetHumanoidIsJumping(true);
 
         rigidBody.linearVelocity = velocity;
 
@@ -716,6 +904,40 @@ public class HumanoidMotor : MonoBehaviour
         humanoid.SetHumanoidAngularVelocity(rigidBody.angularVelocity);
     }
 
+    private void UpdatePermissionRuntime()
+    {
+        canMove = humanoid.CanMove && 
+            humanoid.IsAlive &&
+            !humanoid.PlatformStanding && 
+            movementLockCount <= 0;
+        
+        canJump = humanoid.CanJump &&
+            humanoid.IsAlive &&
+            !humanoid.PlatformStanding &&
+            humanoid.StateType != HumanoidStateType.Airborne &&
+            humanoid.StateType != HumanoidStateType.FreeFalling &&
+            humanoid.StateType != HumanoidStateType.Crouch &&
+            humanoid.StateType != HumanoidStateType.Prone &&
+            isGrounded &&
+            jumpLockCount <= 0;
+
+        canCrouch = humanoid.CanCrouch &&
+            humanoid.IsAlive &&
+            !humanoid.PlatformStanding &&
+            humanoid.StateType != HumanoidStateType.Airborne &&
+            humanoid.StateType != HumanoidStateType.FreeFalling &&
+            humanoid.StateType != HumanoidStateType.Prone &&
+            isGrounded;
+
+        canProne = humanoid.CanProne &&
+            humanoid.IsAlive &&
+            !humanoid.PlatformStanding &&
+            humanoid.StateType != HumanoidStateType.Airborne &&
+            humanoid.StateType != HumanoidStateType.FreeFalling &&
+            humanoid.StateType != HumanoidStateType.Crouch &&
+            isGrounded;
+    }
+
     #endregion
 
     #region UnityHelpers
@@ -742,6 +964,7 @@ public class HumanoidMotor : MonoBehaviour
         wasGrounded = isGrounded;
 
         CheckGround();
+        UpdatePermissionRuntime();
 
         HandleJump();
         HandleMovement();
@@ -751,6 +974,8 @@ public class HumanoidMotor : MonoBehaviour
 
         HandleSlopeSliding();
         HandleRotation();
+        HandleCrouching();
+
         UpdateHumanoidRuntime();
     }
 
