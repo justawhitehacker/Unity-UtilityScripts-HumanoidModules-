@@ -98,7 +98,7 @@ using UnityEngine;
 /// <summary>
 /// Humanoid's module script, as Humanoid "component" of this trasform.
 /// </summary>
-[Serializable] [RequireComponent(typeof(Rigidbody))] [RequireComponent(typeof(Collider))]
+[Serializable, RequireComponent(typeof(Rigidbody)), RequireComponent(typeof(Collider))]
 public class Humanoid : MonoBehaviour 
 { 
     /* Player's properties for humanoid, such as Health, MaxHealth, WalkSpeed, etc.                     *
@@ -169,9 +169,10 @@ public class Humanoid : MonoBehaviour
 
     /* booleans */
     private bool isAlive;
-    private bool isGrounded;
     private bool isMoving;
     private bool isJumping = false;
+    private bool isCrouching;
+    private bool isProning;
     private bool hasTargetPoint = false;
 
     /* ai helpers */
@@ -246,7 +247,6 @@ public class Humanoid : MonoBehaviour
     
     /* booleans */
     public bool IsAlive => isAlive;
-    public bool IsGrounded => isGrounded;
     public bool IsMoving => isMoving;
     public bool PlatformStanding => platformStanding;
     public bool CanMove => canMove;
@@ -752,12 +752,27 @@ public class Humanoid : MonoBehaviour
 
     public void SetHumanoidIsMoving(bool enabled)
     {
+        if (isMoving == enabled) return;
+
         isMoving = enabled;
     }
 
     public void SetHumanoidIsJumping(bool enabled)
     {
+        if (isJumping == enabled) return;
         isJumping = enabled;
+    }
+
+    public void SetHumanoidIsCrouching(bool enabled)
+    {
+        if (isCrouching == enabled) return;
+        isCrouching = enabled;
+    }
+
+    public void SetHumanoidIsProning(bool enabled)
+    {
+        if (isProning == enabled) return;
+        isProning = enabled;
     }
 
     /// <summary>
@@ -987,18 +1002,6 @@ public class Humanoid : MonoBehaviour
 
         if (old != platformStanding)
             OnPlatformStandingChanged?.Invoke(old, platformStanding);
-    }
-
-    /// <summary>
-    /// Setting Humanoid's IsGrounded, that detecting the grounded status from HumanoidMotor's update
-    /// </summary>
-    /// <param name="enabled">True/False</param>
-    public void SetHumanoidIsGrounded(bool enabled)
-    {
-        if (isGrounded == enabled)
-            return;
-
-        isGrounded = enabled;
     }
 
     /// <summary>
