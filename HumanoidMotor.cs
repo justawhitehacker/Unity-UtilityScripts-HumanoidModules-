@@ -1,7 +1,12 @@
 using System;
 using UnityEngine;
 
-[Serializable] [RequireComponent(typeof(Humanoid))] [RequireComponent(typeof(Rigidbody))] [RequireComponent(typeof(Collider))]
+// Crouch Agent -> Automatic agent, no manual control allowed
+// Crouch manual -> Crouch Agent turn to FALSE, should use Crouch() or UnCrouch()
+
+// I don't know if this considered as bug or not, I made this accidentally... should be this a feature??
+
+[Serializable, RequireComponent(typeof(Humanoid)), RequireComponent(typeof(Rigidbody)), RequireComponent(typeof(Collider))]
 public class HumanoidMotor : MonoBehaviour
 {
     #region SerializedPreferences
@@ -60,14 +65,13 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private float crouchTransitionSpeed = 6.0f;
     [SerializeField] private float uncrouchTransitionSpeed = 7.0f;
     [SerializeField] private float crouchFuzzyEquivalence = 0.1f;
-    [SerializeField] private bool invertCrouch = true;
 
     [Header("Crouch Agent")]
     [SerializeField] private bool crouchAgent = false;
-    [SerializeField] private bool autoCrouchOverCeiling = false;
     [SerializeField] private bool cantUncrouchOverCeiling = false;
     [SerializeField] private bool autoScaleOverCeiling = false;
-    [SerializeField] private float autoScaleMaximum = 1.0f;
+    [SerializeField] private float autoScaleCrouchMultiplier = 0.2f;
+    [SerializeField] private float autoScaleCrouchMaximum = 1.0f;
 
     [Header("Mass")]
     [SerializeField] private float gravityScale = 1.0f;
@@ -114,6 +118,7 @@ public class HumanoidMotor : MonoBehaviour
     private bool _crouchStandCenterObtained = false;
     private bool _proneStandCenterObtained = false;
 
+
     private bool isGrounded;
     private bool isCeilingAbove;
     private bool isOnSlope;
@@ -121,6 +126,10 @@ public class HumanoidMotor : MonoBehaviour
 
     private float fallStartY;
     private float fallDistance;
+
+    private float _ceilingDistance;
+
+    private float _currentCrouchHeight;
 
     private float _lastGroundedTime;
     private float _lastCeilingAboveTime;
@@ -363,7 +372,7 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void UnCrouch()
     {
-        if (_cantUncrouch) return;
+        if (crouchAgent && _cantUncrouch && cantUncrouchOverCeiling) return;
         _setCrouching = false;
     }
 
@@ -462,8 +471,10 @@ public class HumanoidMotor : MonoBehaviour
     {
         if (crouchAgent)
         {
-            _cantUncrouch = true;
-            _setCrouching = true;
+            if (cantUncrouchOverCeiling)
+                _cantUncrouch = true;
+
+            _setCrouching = true;            
         }
 
         CeilingAboveHead?.Invoke();
@@ -481,10 +492,19 @@ public class HumanoidMotor : MonoBehaviour
         if (isCeilingAbove)
             CeilingAboveHeadExit?.Invoke();
         
+        _ceilingDistance = Mathf.Infinity;
         isCeilingAbove = false;
     }
 
-    private bool TryCrouch(Collider collider, float crouchHeight)
+    private float GetAutoScaleCrouchHeight(float ceilingDistance)
+    {
+        float availableHeight = ceilingDistance - headSkin;
+        float targetHeight = Mathf.Clamp(bodyHeight - (bodyHeight - availableHeight) * autoScaleCrouchMultiplier, autoScaleCrouchMaximum, bodyHeight);
+        
+        return targetHeight;
+    }
+
+    private bool TryCrouch(Collider collider, float standingHeight, float crouchHeight)
     {
         switch (collider)
         {
@@ -497,11 +517,11 @@ public class HumanoidMotor : MonoBehaviour
                     _standingCenter = capsule.center;
                     _crouchStandCenterObtained = true;
                 }
-                float diff = targetHeight / 2;
-                diff = invertCrouch ? -diff: diff;
+                float standingBottom = standingHeight - targetHeight;
+                float targetY = _standingCenter.y - (standingBottom / 2);
 
                 float t = crouchTransitionSpeed * Time.fixedDeltaTime;
-                Vector3 targetCenter = new Vector3(_standingCenter.x, diff, _standingCenter.z);
+                Vector3 targetCenter = new Vector3(_standingCenter.x, targetY, _standingCenter.z);
 
                 float lerpHeight = Mathf.Lerp(capsule.height, targetHeight, t);
                 Vector3 lerpCenter = Vector3.Lerp(capsule.center, targetCenter, t);
@@ -519,6 +539,8 @@ public class HumanoidMotor : MonoBehaviour
                     capsule.center = targetCenter;        
                 }
 
+                _currentCrouchHeight = capsule.height;
+
                 return true;
             }
             
@@ -531,11 +553,11 @@ public class HumanoidMotor : MonoBehaviour
                     _standingCenter = box.center;
                     _crouchStandCenterObtained = true;        
                 }
-                float diff = targetHeight / 2;
-                diff = invertCrouch ? -diff: diff;
+                float standingBottom = standingHeight - targetHeight;
+                float targetY = _standingCenter.y - (standingBottom / 2);
 
                 float t = crouchTransitionSpeed * Time.fixedDeltaTime;
-                Vector3 targetCenter = new Vector3(_standingCenter.x, diff, _standingCenter.z);
+                Vector3 targetCenter = new Vector3(_standingCenter.x, targetY, _standingCenter.z);
                 
                 float lerpHeight = Mathf.Lerp(box.size.y, targetHeight, t);
                 Vector3 lerpCenter = Vector3.Lerp(box.center, targetCenter, t);
@@ -569,11 +591,11 @@ public class HumanoidMotor : MonoBehaviour
                     _standingCenter = sphere.center;
                     _crouchStandCenterObtained = true;
                 }
-                float diff = targetHeight / 2;
-                diff = invertCrouch ? -diff : diff;
+                float standingBottom = standingHeight - targetHeight;
+                float targetY = _standingCenter.y - standingBottom;
 
                 float t = crouchTransitionSpeed * Time.fixedDeltaTime;
-                Vector3 targetCenter = new Vector3(_standingCenter.x, diff, _standingCenter.z);
+                Vector3 targetCenter = new Vector3(_standingCenter.x, targetY, _standingCenter.z);
 
                 float lerpHeight = Mathf.Lerp(sphere.radius, targetHeight, t);
                 Vector3 lerpCenter = Vector3.Lerp(sphere.center, targetCenter, t);
@@ -758,7 +780,15 @@ public class HumanoidMotor : MonoBehaviour
     {
         if (_setCrouching)
         {
-            bool crouch = TryCrouch(bodyCollider, crouchHeight);
+            float targetHeight = crouchHeight;
+
+            if (crouchAgent && isCeilingAbove)
+            {
+                if (autoScaleOverCeiling)
+                    targetHeight = GetAutoScaleCrouchHeight(_ceilingDistance);
+            }
+
+            bool crouch = TryCrouch(bodyCollider, bodyHeight, targetHeight);
 
             if (crouch && !_crouched)
                 OnCrouchBegin?.Invoke();
@@ -936,6 +966,7 @@ public class HumanoidMotor : MonoBehaviour
 
         if (isChecked)
         {
+            _ceilingDistance = hitInfo.distance;
             CeilingIsAboveHelper();
         }
         else
@@ -954,6 +985,7 @@ public class HumanoidMotor : MonoBehaviour
 
                 if (ray)
                 {
+                    _ceilingDistance = alternateHit.distance;
                     CeilingIsAboveHelper();
                 }
                 else
@@ -964,9 +996,7 @@ public class HumanoidMotor : MonoBehaviour
         }
 
         if (!isChecked)
-        {
             CeilingIsntAboveHelper();
-        }
 
         if (!oldCeilingAbove && isCeilingAbove)
             CeilingAboveHeadEnter?.Invoke();
@@ -1211,6 +1241,7 @@ public class HumanoidMotor : MonoBehaviour
         rigidBody.interpolation = RigidbodyInterpolation.Interpolate;
 
         _idleStayingTimer = Time.time;
+        _currentCrouchHeight = bodyHeight;
     }
 
     private void FixedUpdate()
