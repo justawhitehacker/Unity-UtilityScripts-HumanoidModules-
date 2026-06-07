@@ -15,6 +15,7 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private Transform rootPart;
     [SerializeField] private Collider bodyCollider;
     [SerializeField] private Transform groundCheck;
+    [SerializeField] private Transform headCheck;
 
     [Header("Movement")]
     [SerializeField] private float acceleration = 45.0f;
@@ -29,14 +30,21 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private float rotationSpeed = 8.0f;
     [SerializeField] private bool onlyRotateByMoving = true;
 
-    [Header("Ground")]
-    [SerializeField] private LayerMask layer;
+    [Header("Feet")]
+    [SerializeField] private LayerMask feetLayer;
     [SerializeField] private float maxSlopeAngle = 45.0f;
     [SerializeField] private float checkRadius = 0.35f;
     [SerializeField] private float checkDistance = 0.65f;
     [SerializeField] private float groundedStickForce = 8.0f;
     [SerializeField] private float slopeSlideAcceleration = 18.0f;
     [SerializeField] private float ignoreGroundAfterJump = 0.08f;
+    [SerializeField] private float feetSkin = 0.05f;
+
+    [Header("Head")]
+    [SerializeField] private LayerMask headLayer;
+    [SerializeField] private float headRadius = 0.35f;
+    [SerializeField] private float headMaxDistance = 0.65f;
+    [SerializeField] private float headSkin = 0.075f;
 
     [Header("Jump")]
     [SerializeField] private float jumpHeight = 2.2f;
@@ -46,11 +54,20 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private float jumpCutMultiplier = 0.5f;
 
     [Header("Crouch")]
-    [SerializeField] private bool canAutomaticCrouch = false;
-    [SerializeField] private Transform headChecker;
-    [SerializeField] private float bodyHeight = 2;
-    [SerializeField] private float crouchHeight = 1;
+    [SerializeField] private float bodyHeight = 2.0f;
+    [SerializeField] private float crouchHeight = 1.0f;
+    [SerializeField] private float crouchWalkingSpeed = 5.0f;
+    [SerializeField] private float crouchTransitionSpeed = 6.0f;
+    [SerializeField] private float uncrouchTransitionSpeed = 7.0f;
+    [SerializeField] private float crouchFuzzyEquivalence = 0.1f;
     [SerializeField] private bool invertCrouch = true;
+
+    [Header("Crouch Agent")]
+    [SerializeField] private bool crouchAgent = false;
+    [SerializeField] private bool autoCrouchOverCeiling = false;
+    [SerializeField] private bool cantUncrouchOverCeiling = false;
+    [SerializeField] private bool autoScaleOverCeiling = false;
+    [SerializeField] private float autoScaleMaximum = 1.0f;
 
     [Header("Mass")]
     [SerializeField] private float gravityScale = 1.0f;
@@ -71,48 +88,54 @@ public class HumanoidMotor : MonoBehaviour
 
     #region UnserializedReferences
 
-    private Vector3 moveInput;
-    private Vector3 targetMoveDirection;
+    private Vector3 _moveInput;
+    private Vector3 _targetMoveDirection;
     private Vector3 groundNormal;
     private Vector3 moveDirection;
     private Vector3 lastMoveDirection;
 
-    private Vector3 standingCenter;
+    private Vector3 _standingCenter;
 
     private PhysicsMaterial floorMaterial;
     private Collider floorCollider;
 
-    private bool runReady;
-    private bool jumpRequested;
-    private bool setCrouching;
-    private bool setProne;
+    private bool _runReady;
+    private bool _jumpRequested;
+    private bool _setCrouching;
+    private bool _setProne;
     private bool jumpHolding;
     private bool motorEnabled = true;
 
-    private bool crouched = false;
-    private bool proned = false;
+    private bool _crouched = false;
+    private bool _proned = false;
+
+    private bool _cantUncrouch = false;
+
+    private bool _crouchStandCenterObtained = false;
+    private bool _proneStandCenterObtained = false;
 
     private bool isGrounded;
-    private bool wasGrounded;
+    private bool isCeilingAbove;
     private bool isOnSlope;
     private bool isSliding;
 
     private float fallStartY;
     private float fallDistance;
 
-    private float lastGroundedTime;
-    private float lastJumpRequestTime;
-    private float lastJumpTime;
-    private float lastCrouchTime;
-    private float lastProneTime;
-    private float staminaUsedTimer;
-    private float groundIgnoreTimer;
-    private float idleStayingTimer;
+    private float _lastGroundedTime;
+    private float _lastCeilingAboveTime;
+    private float _lastJumpRequestTime;
+    private float _lastJumpTime;
+    private float _lastCrouchTime;
+    private float _lastProneTime;
+    private float _staminaUsedTimer;
+    private float _groundIgnoreTimer;
+    private float _idleStayingTimer;
 
-    private float idleStayingCounter;
+    private float _idleStayingCounter;
 
-    private int movementLockCount;
-    private int jumpLockCount;
+    private int _movementLockCount;
+    private int _jumpLockCount;
 
     private bool canMove;
     private bool canJump;
@@ -136,6 +159,9 @@ public class HumanoidMotor : MonoBehaviour
     public event Action OnProneBegin;
     public event Action OnAirborneBegin;
     public event Action OnFreeFallingBegin;
+    public event Action CeilingAboveHeadEnter;
+    public event Action CeilingAboveHead;
+    public event Action CeilingAboveHeadExit;
 
     public event Action OnAirborne;
     public event Action OnFreeFalling;
@@ -166,7 +192,8 @@ public class HumanoidMotor : MonoBehaviour
     public PhysicsMaterial FloorMaterial => floorMaterial;
     public Collider FloorCollider => floorCollider;
 
-    public LayerMask Layer => layer;
+    public LayerMask FeetLayer => feetLayer;
+    public LayerMask HeadLayer => headLayer;
 
     public float Acceleration => acceleration;
     public float Deceleration => deceleration;
@@ -215,7 +242,7 @@ public class HumanoidMotor : MonoBehaviour
     public bool IsGrounded => isGrounded;
     public bool IsOnSlope => isOnSlope;
     public bool IsSliding => isSliding;
-
+    public bool IsCeilingAbove => isCeilingAbove;
 
     #endregion
 
@@ -234,15 +261,18 @@ public class HumanoidMotor : MonoBehaviour
         Vector3 dir = Direction;
         dir.y = 0f;
 
-        bool canRun = Running && humanoid.Stamina > humanoid.StaminaDecrementAmount;
+        bool canRun = Running &&
+            humanoid.StateType != HumanoidStateType.Crouch &&
+            humanoid.StateType != HumanoidStateType.Prone &&
+            humanoid.Stamina > humanoid.StaminaDecrementAmount;
 
         if (dir.sqrMagnitude > 0.05f)
             dir.Normalize();
         else
             dir = Vector3.zero;
 
-        moveInput = dir;
-        runReady = canRun;
+        _moveInput = dir;
+        _runReady = canRun;
     }
 
     /// <summary>
@@ -250,8 +280,8 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void StopMove()
     {
-        moveInput = Vector3.zero;
-        runReady = false;
+        _moveInput = Vector3.zero;
+        _runReady = false;
     }
 
      /// <summary>
@@ -303,9 +333,9 @@ public class HumanoidMotor : MonoBehaviour
         if (!motorEnabled || !canJump)
             return;
 
-        jumpRequested = true;
+        _jumpRequested = true;
         jumpHolding = true;
-        lastJumpRequestTime = Time.time;
+        _lastJumpRequestTime = Time.time;
     }
 
     /// <summary>
@@ -324,8 +354,8 @@ public class HumanoidMotor : MonoBehaviour
         if (!motorEnabled || !canCrouch)
             return;
 
-        setCrouching = true;
-        lastCrouchTime = Time.time;
+        _setCrouching = true;
+        _lastCrouchTime = Time.time;
     }
 
     /// <summary>
@@ -333,7 +363,8 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void UnCrouch()
     {
-        setCrouching = false;
+        if (_cantUncrouch) return;
+        _setCrouching = false;
     }
 
     /// <summary>
@@ -373,7 +404,7 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void LockMovement()
     {
-        movementLockCount++;
+        _movementLockCount++;
     }
 
     /// <summary>
@@ -381,7 +412,7 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void UnlockMovement()
     {
-        movementLockCount = Mathf.Max(0, movementLockCount - 1);
+        _movementLockCount = Mathf.Max(0, _movementLockCount - 1);
     }
 
     /// <summary>
@@ -389,7 +420,7 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void LockJump()
     {
-        jumpLockCount++;
+        _jumpLockCount++;
     }
 
     /// <summary>
@@ -397,7 +428,7 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void UnlockJump()
     {
-        jumpLockCount = Mathf.Max(0, jumpLockCount - 1);
+        _jumpLockCount = Mathf.Max(0, _jumpLockCount - 1);
     }
 
     /// <summary>
@@ -427,51 +458,141 @@ public class HumanoidMotor : MonoBehaviour
 
     #region InternalHelpers
 
-    private Vector3 GetCapsuleColliderDirection(CapsuleCollider capsule)
+    private void CeilingIsAboveHelper()
     {
-        return capsule.direction switch
+        if (crouchAgent)
         {
-            0 => Vector3.right,
-            1 => Vector3.up,
-            2 => Vector3.forward,
-            _ => Vector3.up
-        };
+            _cantUncrouch = true;
+            _setCrouching = true;
+        }
+
+        CeilingAboveHead?.Invoke();
+        isCeilingAbove = true;
     }
 
-    private bool TryCrouch(Collider collider, float halfHeight)
+    private void CeilingIsntAboveHelper()
+    {
+        if (crouchAgent)
+        {
+            _cantUncrouch = false;
+            _setCrouching = false;
+        }
+
+        if (isCeilingAbove)
+            CeilingAboveHeadExit?.Invoke();
+        
+        isCeilingAbove = false;
+    }
+
+    private bool TryCrouch(Collider collider, float crouchHeight)
     {
         switch (collider)
         {
             case CapsuleCollider capsule:
-                capsule.height = halfHeight;
-                halfHeight = halfHeight * 0.5f;
+            {
+                float targetHeight = crouchHeight;
 
-                capsule.center = new Vector3(capsule.center.x, invertCrouch ? -halfHeight : halfHeight, capsule.center.z);
-            //    Vector3 direction = GetCapsuleColliderDirection(capsule);
-            //    halfHeight = standingHeight - halfHeight;
-               
-            //    standingCenter = capsule.center;
-               
-            //    Vector3 center = standingCenter - direction * (halfHeight / 2);
-            //    capsule.center = new Vector3(capsule.center.x, center.y, capsule.center.z);
-               return true;
+                if (!_crouchStandCenterObtained)
+                {
+                    _standingCenter = capsule.center;
+                    _crouchStandCenterObtained = true;
+                }
+                float diff = targetHeight / 2;
+                diff = invertCrouch ? -diff: diff;
 
+                float t = crouchTransitionSpeed * Time.fixedDeltaTime;
+                Vector3 targetCenter = new Vector3(_standingCenter.x, diff, _standingCenter.z);
+
+                float lerpHeight = Mathf.Lerp(capsule.height, targetHeight, t);
+                Vector3 lerpCenter = Vector3.Lerp(capsule.center, targetCenter, t);
+
+                capsule.height = lerpHeight;
+                capsule.center = lerpCenter;
+
+                bool fuzzyEq = 
+                    Mathf.Abs(capsule.height - targetHeight) < crouchFuzzyEquivalence &&
+                    Vector3.Distance(capsule.center, targetCenter) < crouchFuzzyEquivalence;
+                
+                if (fuzzyEq)
+                {
+                    capsule.height = targetHeight;
+                    capsule.center = targetCenter;        
+                }
+
+                return true;
+            }
             
             case BoxCollider box:
-                box.size = new Vector3(box.size.x, halfHeight, box.size.z);
-                halfHeight = halfHeight / 2;
-                 
-                standingCenter = box.center;
-                box.center = new Vector3(box.center.x, halfHeight, box.center.z);
+            {
+                float targetHeight = crouchHeight;
+
+                if (!_crouchStandCenterObtained)
+                {
+                    _standingCenter = box.center;
+                    _crouchStandCenterObtained = true;        
+                }
+                float diff = targetHeight / 2;
+                diff = invertCrouch ? -diff: diff;
+
+                float t = crouchTransitionSpeed * Time.fixedDeltaTime;
+                Vector3 targetCenter = new Vector3(_standingCenter.x, diff, _standingCenter.z);
+                
+                float lerpHeight = Mathf.Lerp(box.size.y, targetHeight, t);
+                Vector3 lerpCenter = Vector3.Lerp(box.center, targetCenter, t);
+
+                Vector3 lerpSize = box.size;
+                lerpSize.y = lerpHeight;
+
+                box.size = lerpSize;
+                box.center = lerpCenter;
+
+                bool fuzzyEq = 
+                    Mathf.Abs(box.size.y - targetHeight) < crouchFuzzyEquivalence &&
+                    Vector3.Distance(box.center, targetCenter) < crouchFuzzyEquivalence;
+                
+                if (fuzzyEq)
+                {
+                    box.size = new Vector3(box.size.x, targetHeight, box.size.z);
+                    box.center = targetCenter;        
+                }
+
+                
                 return true;
+            }
 
             case SphereCollider sphere:
-                sphere.radius = halfHeight;
-                halfHeight = halfHeight / 2;
-                
-                standingCenter = sphere.center;
-                sphere.center = new Vector3(sphere.center.x, halfHeight, sphere.center.z);
+            {
+                float targetHeight = crouchHeight;
+
+                if (!_crouchStandCenterObtained)
+                {
+                    _standingCenter = sphere.center;
+                    _crouchStandCenterObtained = true;
+                }
+                float diff = targetHeight / 2;
+                diff = invertCrouch ? -diff : diff;
+
+                float t = crouchTransitionSpeed * Time.fixedDeltaTime;
+                Vector3 targetCenter = new Vector3(_standingCenter.x, diff, _standingCenter.z);
+
+                float lerpHeight = Mathf.Lerp(sphere.radius, targetHeight, t);
+                Vector3 lerpCenter = Vector3.Lerp(sphere.center, targetCenter, t);
+
+                sphere.radius = lerpHeight;
+                sphere.center = lerpCenter;
+
+                bool fuzzyEq =
+                    Mathf.Abs(sphere.radius - targetHeight) < crouchFuzzyEquivalence &&
+                    Vector3.Distance(sphere.center, targetCenter) < crouchFuzzyEquivalence;
+
+                if (fuzzyEq)
+                {
+                    sphere.radius = targetHeight;
+                    sphere.center = targetCenter;        
+                }
+
                 return true;
+            }
 
             default:
                 return false;
@@ -483,23 +604,90 @@ public class HumanoidMotor : MonoBehaviour
         switch (collider)
         {
             case CapsuleCollider capsule:
-               capsule.height = standingHeight;
-                              
-               capsule.center = standingCenter;
-               return true;
+            {
+                float targetHeight = standingHeight;
+                Vector3 targetCenter = _standingCenter;
+                
+                float t = uncrouchTransitionSpeed * Time.fixedDeltaTime;
 
+                float lerpHeight = Mathf.Lerp(capsule.height, targetHeight, t);
+                Vector3 lerpCenter = Vector3.Lerp(capsule.center, targetCenter, t);
+
+                capsule.height = lerpHeight;
+                capsule.center = lerpCenter;
+
+                bool fuzzyEq = 
+                    Mathf.Abs(capsule.height - targetHeight) < crouchFuzzyEquivalence &&
+                    Vector3.Distance(capsule.center, targetCenter) < crouchFuzzyEquivalence;
+                
+                if (fuzzyEq)
+                {
+                    capsule.height = standingHeight;
+                    capsule.center = targetCenter;
+
+                    _crouchStandCenterObtained = false;        
+                }
+                return true;
+            }
             
             case BoxCollider box:
-                box.size = new Vector3(box.size.x, standingHeight, box.size.z);
+            {
+                float targetHeight = standingHeight;
+                Vector3 targetCenter = _standingCenter;
+
+                float t = uncrouchTransitionSpeed * Time.fixedDeltaTime;
+
+                float lerpHeight = Mathf.Lerp(box.size.y, targetHeight, t);
+                Vector3 lerpCenter = Vector3.Lerp(box.center, targetCenter, t);
+
+                Vector3 lerpSize = box.size;
+                lerpSize.y = lerpHeight;
+
+                box.size = lerpSize;
+                box.center = lerpCenter;
+
+                bool fuzzyEq =
+                    Mathf.Abs(box.size.y - targetHeight) < crouchFuzzyEquivalence &&
+                    Vector3.Distance(box.center, targetCenter) < crouchFuzzyEquivalence;
                 
-                box.center = standingCenter;
+                if (fuzzyEq)
+                {
+                    box.size = new Vector3(box.size.y, targetHeight, box.size.z);
+                    box.center = targetCenter;
+
+                    _crouchStandCenterObtained = false;        
+                }
+
                 return true;
+            }
 
             case SphereCollider sphere:
-                sphere.radius = standingHeight;
+            {
+                float targetHeight = standingHeight;
+                Vector3 targetCenter = _standingCenter;
 
-                sphere.center = standingCenter;
+                float t = uncrouchTransitionSpeed * Time.fixedDeltaTime;
+
+                float lerpHeight = Mathf.Lerp(sphere.radius, targetHeight, t);
+                Vector3 lerpCenter = Vector3.Lerp(sphere.center, targetCenter, t);
+
+                sphere.radius = lerpHeight;
+                sphere.center = lerpCenter;
+
+                bool fuzzyEq =
+                    Mathf.Abs(sphere.radius - targetHeight) < crouchFuzzyEquivalence &&
+                    Vector3.Distance(sphere.center, targetCenter) < crouchFuzzyEquivalence;
+                
+                if (fuzzyEq)
+                {
+                    sphere.radius = targetHeight;
+                    sphere.center = targetCenter;
+
+                    _crouchStandCenterObtained = false;        
+                }
+
                 return true;
+            }
 
             default:
                 return false;
@@ -509,7 +697,6 @@ public class HumanoidMotor : MonoBehaviour
     private void ApplyGroundState(bool grounded)
     {
         isGrounded = grounded;
-        humanoid.SetHumanoidIsGrounded(grounded);
 
         if (!grounded)
         {
@@ -533,9 +720,8 @@ public class HumanoidMotor : MonoBehaviour
         isSliding = angle > maxSlopeAngle;
 
         isGrounded = true;
-        lastGroundedTime = Time.time;
+        _lastGroundedTime = Time.time;
 
-        humanoid.SetHumanoidIsGrounded(true);
     }
 
     private void ApplySimpleGroundInfo()
@@ -548,9 +734,8 @@ public class HumanoidMotor : MonoBehaviour
         isSliding = false;
 
         isGrounded = true;
-        lastGroundedTime = Time.time;
+        _lastGroundedTime = Time.time;
 
-        humanoid.SetHumanoidIsGrounded(true);
     }
 
     #endregion
@@ -571,24 +756,28 @@ public class HumanoidMotor : MonoBehaviour
 
     private void HandleCrouching()
     {
-        if (setCrouching)
+        if (_setCrouching)
         {
             bool crouch = TryCrouch(bodyCollider, crouchHeight);
 
-            if (crouch && !crouched)
+            if (crouch && !_crouched)
                 OnCrouchBegin?.Invoke();
 
-            crouched = true;
+            _crouched = true;
             Crouching?.Invoke();
+
+            humanoid.ChangeState(HumanoidStateType.Crouch);
+            humanoid.SetHumanoidIsCrouching(true);
         }
         else
         {
             bool uncrouch = TryUncrouch(bodyCollider, bodyHeight);
 
-            if (uncrouch && crouched)
+            if (uncrouch && _crouched)
                 UnCrouched?.Invoke();
             
-            crouched = false;
+            _crouched = false;
+            humanoid.SetHumanoidIsCrouching(false);
         }
     }
 
@@ -602,7 +791,6 @@ public class HumanoidMotor : MonoBehaviour
                 humanoid.ChangeState(HumanoidStateType.Airborne);
 
                 isGrounded = false;
-                humanoid.SetHumanoidIsGrounded(false);
                 OnAirborneBegin?.Invoke();
             }
 
@@ -622,36 +810,38 @@ public class HumanoidMotor : MonoBehaviour
             OnFreeFalling?.Invoke();
         }
 
-        if (isGrounded && humanoid.StateType == HumanoidStateType.FreeFalling)
+        if (isGrounded)
         {
-            ApplyFallDamage();
-            humanoid.ChangeState(HumanoidStateType.Grounded);
-
-            isGrounded = true;
-            humanoid.SetHumanoidIsGrounded(true);
-
-            Landed?.Invoke();
-        }
-
-        if (isGrounded && (humanoid.IsJumping || humanoid.StateType == HumanoidStateType.Jumping))
-        {
-            humanoid.SetHumanoidIsJumping(false);
-        }
-
-        if (isGrounded && humanoid.StateType != HumanoidStateType.FreeFalling && humanoid.StateType != HumanoidStateType.Airborne)
-        {
-            if (targetMoveDirection.sqrMagnitude <= 0.001f)
+            if (humanoid.StateType == HumanoidStateType.FreeFalling)
             {
-                humanoid.ChangeState(HumanoidStateType.Idle);
-                humanoid.SetHumanoidIsMoving(false);
+                ApplyFallDamage();
+                humanoid.ChangeState(HumanoidStateType.Grounded);
 
-                if (Time.time - idleStayingTimer >= 1)
+                isGrounded = true;
+
+                Landed?.Invoke();
+            }
+            else
+            {
+                if (humanoid.StateType != HumanoidStateType.Airborne)
                 {
-                    idleStayingCounter += 1;
-                    idleStayingTimer = Time.time;
-                }
+                    if (humanoid.StateType != HumanoidStateType.Crouch && humanoid.StateType != HumanoidStateType.Prone)
+                    {
+                        if (_targetMoveDirection.sqrMagnitude <= 0.001f)
+                        {
+                            humanoid.ChangeState(HumanoidStateType.Idle);
+                            humanoid.SetHumanoidIsMoving(false);
 
-                Idle?.Invoke(idleStayingCounter);
+                            if (Time.time - _idleStayingTimer >= 1)
+                            {
+                                _idleStayingCounter += 1;
+                                _idleStayingTimer = Time.time;
+                            }
+
+                            Idle?.Invoke(_idleStayingCounter);
+                        }
+                    }
+                }
             }
         }
     }
@@ -660,14 +850,13 @@ public class HumanoidMotor : MonoBehaviour
     {
         bool oldGrounded = isGrounded;
 
-        if (Time.time < groundIgnoreTimer)
+        if (Time.time < _groundIgnoreTimer)
         {
             ApplyGroundState(false);
             return;
         }
 
-        float skin = 0.05f;
-        Vector3 multiplier = Vector3.up * (checkRadius + skin);
+        Vector3 multiplier = Vector3.up * (checkRadius + feetSkin);
         Vector3 preOrigin = groundCheck != null ?
             groundCheck.position : rootPart.position;
 
@@ -681,7 +870,7 @@ public class HumanoidMotor : MonoBehaviour
             Vector3.down,
             out hitInfo,
             checkDistance,
-            layer,
+            feetLayer,
             QueryTriggerInteraction.Ignore
         );
 
@@ -693,16 +882,16 @@ public class HumanoidMotor : MonoBehaviour
         {
             isChecked = Physics.CheckSphere
             (
-                preOrigin + Vector3.up * skin,
+                preOrigin + Vector3.up * feetSkin,
                 checkRadius * 0.95f,
-                layer,
+                feetLayer,
                 QueryTriggerInteraction.Ignore
             );
 
             if (isChecked)
             {
                 RaycastHit alternateHit;
-                bool ray = Physics.Raycast(origin, Vector3.down, out alternateHit, checkDistance + checkRadius + skin, layer, QueryTriggerInteraction.Ignore);
+                bool ray = Physics.Raycast(origin, Vector3.down, out alternateHit, checkDistance + checkRadius + feetSkin, feetLayer, QueryTriggerInteraction.Ignore);
 
                 if (ray)
                     ApplyGroundInfo(alternateHit);
@@ -718,23 +907,92 @@ public class HumanoidMotor : MonoBehaviour
             Grounded?.Invoke();
     }
 
+    private void CheckHead()
+    {
+        bool oldCeilingAbove = isCeilingAbove;
+
+        if (Time.time < _lastCeilingAboveTime)
+        {
+            CeilingIsntAboveHelper();
+            return;
+        }
+
+        Vector3 multiplier = Vector3.down * (headRadius + headSkin);
+        Vector3 preOrigin = headCheck != null ?
+            headCheck.position : rootPart.position;
+
+        Vector3 origin = multiplier + preOrigin;
+
+        RaycastHit hitInfo;
+        bool isChecked = Physics.SphereCast(
+            origin,
+            checkRadius,
+            Vector3.down,
+            out hitInfo,
+            headMaxDistance,
+            headLayer,
+            QueryTriggerInteraction.Ignore
+        );
+
+        if (isChecked)
+        {
+            CeilingIsAboveHelper();
+        }
+        else
+        {
+            isChecked = Physics.CheckSphere(
+                preOrigin + Vector3.down * feetSkin,
+                headRadius * 0.95f,
+                headLayer,
+                QueryTriggerInteraction.Ignore
+            );
+
+            if (isChecked)
+            {
+                RaycastHit alternateHit;
+                bool ray = Physics.Raycast(origin, Vector3.up, out alternateHit, headMaxDistance + headRadius + headSkin, headLayer, QueryTriggerInteraction.Ignore);
+
+                if (ray)
+                {
+                    CeilingIsAboveHelper();
+                }
+                else
+                {
+                    CeilingIsntAboveHelper();
+                }
+            }
+        }
+
+        if (!isChecked)
+        {
+            CeilingIsntAboveHelper();
+        }
+
+        if (!oldCeilingAbove && isCeilingAbove)
+            CeilingAboveHeadEnter?.Invoke();
+    }
+
     private void HandleMovement()
     {
         Vector3 velocity = rigidBody.linearVelocity;
         Vector3 horizontalVelocity = velocity;
         horizontalVelocity.y = 0f;
 
-        targetMoveDirection = moveInput;
+        _targetMoveDirection = _moveInput;
 
         if (isGrounded && !isSliding)
-            targetMoveDirection = Vector3.ProjectOnPlane(targetMoveDirection, groundNormal).normalized;
+            _targetMoveDirection = Vector3.ProjectOnPlane(_targetMoveDirection, groundNormal).normalized;
 
-        bool onInput = targetMoveDirection.sqrMagnitude > 0.001f;
+        bool onInput = _targetMoveDirection.sqrMagnitude > 0.001f;
 
-        idleStayingCounter = onInput ? 0 : idleStayingCounter;
+        _idleStayingCounter = onInput ? 0 : _idleStayingCounter;
 
-        float speed = runReady ? humanoid.RunningSpeed : humanoid.WalkSpeed;
-        Vector3 targetHorizontalVelocity = onInput ? targetMoveDirection * speed : Vector3.zero;
+        float speed = _runReady ? humanoid.RunningSpeed : humanoid.WalkSpeed;
+
+        // double check speed for crouch
+        speed = humanoid.StateType == HumanoidStateType.Crouch ? crouchWalkingSpeed : speed;
+
+        Vector3 targetHorizontalVelocity = onInput ? _targetMoveDirection * speed : Vector3.zero;
 
         float accel;
         
@@ -761,39 +1019,39 @@ public class HumanoidMotor : MonoBehaviour
         rigidBody.linearVelocity = velocity;
         humanoid.SetHumanoidIsMoving(onInput);
 
-        moveDirection = onInput ? targetMoveDirection.normalized : Vector3.zero;
+        moveDirection = onInput ? _targetMoveDirection.normalized : Vector3.zero;
         if (onInput)
-            lastMoveDirection = targetMoveDirection.normalized;
+            lastMoveDirection = _targetMoveDirection.normalized;
 
         if (onInput && humanoid.StateType != HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling || isGrounded)
-            humanoid.ChangeState(runReady ? HumanoidStateType.Running : HumanoidStateType.Walking);
+            humanoid.ChangeState(_runReady ? HumanoidStateType.Running : HumanoidStateType.Walking);
 
-        if (runReady)
+        if (_runReady)
         {
-            staminaUsedTimer += Time.deltaTime;
+            _staminaUsedTimer += Time.deltaTime;
 
-            if (staminaUsedTimer >= humanoid.StaminaDecrementTick)
+            if (_staminaUsedTimer >= humanoid.StaminaDecrementTick)
             {
                 bool usingStamina = humanoid.TryUsingStamina(humanoid.StaminaDecrementAmount);
-                staminaUsedTimer = 0;
+                _staminaUsedTimer = 0;
 
                 if (!usingStamina)
-                    runReady = false;
+                    _runReady = false;
             }
 
-            OnRunning?.Invoke(targetMoveDirection.normalized);
+            OnRunning?.Invoke(_targetMoveDirection.normalized);
         }
         else
         {
-            OnWalking?.Invoke(targetMoveDirection.normalized);
+            OnWalking?.Invoke(_targetMoveDirection.normalized);
         }
     }
 
     private void HandleJump()
     {
-        bool hasTimeBuffer = jumpRequested && Time.time - lastJumpRequestTime <= jumpBufferTime;
-        bool canCoyote = isGrounded || Time.time - lastGroundedTime <= coyoteTime;
-        bool cooldownReady = Time.time - lastJumpTime >= jumpCooldown;
+        bool hasTimeBuffer = _jumpRequested && Time.time - _lastJumpRequestTime <= jumpBufferTime;
+        bool canCoyote = isGrounded || Time.time - _lastGroundedTime <= coyoteTime;
+        bool cooldownReady = Time.time - _lastJumpTime >= jumpCooldown;
 
         if (!cooldownReady || !canCoyote || !hasTimeBuffer)
             return;
@@ -812,15 +1070,14 @@ public class HumanoidMotor : MonoBehaviour
 
         rigidBody.linearVelocity = velocity;
 
-        jumpRequested = false;
-        lastJumpRequestTime = -999f;
+        _jumpRequested = false;
+        _lastJumpRequestTime = -999f;
 
-        lastJumpTime = Time.time;
-        lastGroundedTime = -999f;
+        _lastJumpTime = Time.time;
+        _lastGroundedTime = -999f;
 
         isGrounded = false;
-        humanoid.SetHumanoidIsGrounded(false);
-        groundIgnoreTimer = Time.time + ignoreGroundAfterJump;
+        _groundIgnoreTimer = Time.time + ignoreGroundAfterJump;
 
         humanoid.ChangeState(HumanoidStateType.Jumping);
         OnJumping?.Invoke();
@@ -895,7 +1152,7 @@ public class HumanoidMotor : MonoBehaviour
         if (!autoRotate)
             return;
 
-        FaceDirection(targetMoveDirection);
+        FaceDirection(_targetMoveDirection);
     }
 
     private void UpdateHumanoidRuntime()
@@ -909,7 +1166,7 @@ public class HumanoidMotor : MonoBehaviour
         canMove = humanoid.CanMove && 
             humanoid.IsAlive &&
             !humanoid.PlatformStanding && 
-            movementLockCount <= 0;
+            _movementLockCount <= 0;
         
         canJump = humanoid.CanJump &&
             humanoid.IsAlive &&
@@ -919,7 +1176,7 @@ public class HumanoidMotor : MonoBehaviour
             humanoid.StateType != HumanoidStateType.Crouch &&
             humanoid.StateType != HumanoidStateType.Prone &&
             isGrounded &&
-            jumpLockCount <= 0;
+            _jumpLockCount <= 0;
 
         canCrouch = humanoid.CanCrouch &&
             humanoid.IsAlive &&
@@ -953,7 +1210,7 @@ public class HumanoidMotor : MonoBehaviour
         rigidBody.useGravity = false;
         rigidBody.interpolation = RigidbodyInterpolation.Interpolate;
 
-        idleStayingTimer = Time.time;
+        _idleStayingTimer = Time.time;
     }
 
     private void FixedUpdate()
@@ -961,9 +1218,9 @@ public class HumanoidMotor : MonoBehaviour
         if (!motorEnabled || !humanoid.IsAlive)
             return;
         
-        wasGrounded = isGrounded;
-
         CheckGround();
+        CheckHead();
+
         UpdatePermissionRuntime();
 
         HandleJump();
