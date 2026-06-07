@@ -100,8 +100,13 @@ public class HumanoidMotor : MonoBehaviour
 
     private bool _runReady;
     private bool _jumpRequested;
+
     private bool _setCrouching;
-    private bool _setProne;
+    private bool _agentForceSetCrouching; 
+
+    private bool _setProning;
+    private bool _agentForceSetProning;
+
     private bool jumpHolding;
     private bool motorEnabled = true;
 
@@ -123,8 +128,6 @@ public class HumanoidMotor : MonoBehaviour
     private float fallDistance;
 
     private float _ceilingDistance;
-
-    private float _currentCrouchHeight;
 
     private float _lastGroundedTime;
     private float _lastCeilingAboveTime;
@@ -367,7 +370,8 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void UnCrouch()
     {
-        if (crouchAgent && _cantUncrouch) return;
+        if (_agentForceSetCrouching && _cantUncrouch) return;
+
         _setCrouching = false;
     }
 
@@ -465,12 +469,11 @@ public class HumanoidMotor : MonoBehaviour
     private void CeilingIsAboveHelper()
     {
         if (crouchAgent && autoScaleOverCeiling)
-            Crouch();
+            _agentForceSetCrouching = true;
 
         if (crouchAgent && cantUncrouchOverCeiling)
             _cantUncrouch = true;
         
-
         CeilingAboveHead?.Invoke();
         isCeilingAbove = true;
     }
@@ -481,8 +484,7 @@ public class HumanoidMotor : MonoBehaviour
             _cantUncrouch = false;
 
         if (crouchAgent && autoScaleOverCeiling)
-            UnCrouch();
-        
+            _agentForceSetCrouching = false;
 
         if (isCeilingAbove)
             CeilingAboveHeadExit?.Invoke();
@@ -533,9 +535,6 @@ public class HumanoidMotor : MonoBehaviour
                     capsule.height = targetHeight;
                     capsule.center = targetCenter;        
                 }
-
-                _currentCrouchHeight = capsule.height;
-
                 return true;
             }
             
@@ -773,18 +772,14 @@ public class HumanoidMotor : MonoBehaviour
 
     private void HandleCrouching()
     {
-        if (_setCrouching)
+        bool handleCrouch = _setCrouching || _agentForceSetCrouching;
+
+        if (handleCrouch)
         {
             float targetHeight = crouchHeight;
 
-            if (crouchAgent)
-            {
-                if (autoScaleOverCeiling)
-                {
-                    if (isCeilingAbove)
-                        targetHeight = GetAutoScaleCrouchHeight(_ceilingDistance);
-                }
-            }
+            if (_agentForceSetCrouching && autoScaleOverCeiling && isCeilingAbove)
+                targetHeight = GetAutoScaleCrouchHeight(_ceilingDistance);
 
             bool crouch = TryCrouch(bodyCollider, bodyHeight, targetHeight);
 
@@ -805,6 +800,8 @@ public class HumanoidMotor : MonoBehaviour
                 UnCrouched?.Invoke();
             
             _crouched = false;
+
+            humanoid.ChangeState(HumanoidStateType.Idle);
             humanoid.SetHumanoidIsCrouching(false);
         }
     }
@@ -1051,7 +1048,12 @@ public class HumanoidMotor : MonoBehaviour
         if (onInput)
             lastMoveDirection = _targetMoveDirection.normalized;
 
-        if (onInput && humanoid.StateType != HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling || isGrounded)
+        if (onInput && 
+            humanoid.StateType != HumanoidStateType.Airborne && 
+            humanoid.StateType != HumanoidStateType.FreeFalling && 
+            humanoid.StateType != HumanoidStateType.Crouch &&
+            humanoid.StateType != HumanoidStateType.Prone &&
+            isGrounded)
             humanoid.ChangeState(_runReady ? HumanoidStateType.Running : HumanoidStateType.Walking);
 
         if (_runReady)
@@ -1239,7 +1241,6 @@ public class HumanoidMotor : MonoBehaviour
         rigidBody.interpolation = RigidbodyInterpolation.Interpolate;
 
         _idleStayingTimer = Time.time;
-        _currentCrouchHeight = bodyHeight;
     }
 
     private void FixedUpdate()
