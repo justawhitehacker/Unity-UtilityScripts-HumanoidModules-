@@ -1,11 +1,6 @@
 using System;
 using UnityEngine;
 
-// Crouch Agent -> Automatic agent, no manual control allowed
-// Crouch manual -> Crouch Agent turn to FALSE, should use Crouch() or UnCrouch()
-
-// I don't know if this considered as bug or not, I made this accidentally... should be this a feature??
-
 [Serializable, RequireComponent(typeof(Humanoid)), RequireComponent(typeof(Rigidbody)), RequireComponent(typeof(Collider))]
 public class HumanoidMotor : MonoBehaviour
 {
@@ -372,7 +367,7 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void UnCrouch()
     {
-        if (crouchAgent && _cantUncrouch && cantUncrouchOverCeiling) return;
+        if (crouchAgent && _cantUncrouch) return;
         _setCrouching = false;
     }
 
@@ -469,13 +464,12 @@ public class HumanoidMotor : MonoBehaviour
 
     private void CeilingIsAboveHelper()
     {
-        if (crouchAgent)
-        {
-            if (cantUncrouchOverCeiling)
-                _cantUncrouch = true;
+        if (crouchAgent && autoScaleOverCeiling)
+            Crouch();
 
-            _setCrouching = true;            
-        }
+        if (crouchAgent && cantUncrouchOverCeiling)
+            _cantUncrouch = true;
+        
 
         CeilingAboveHead?.Invoke();
         isCeilingAbove = true;
@@ -483,11 +477,12 @@ public class HumanoidMotor : MonoBehaviour
 
     private void CeilingIsntAboveHelper()
     {
-        if (crouchAgent)
-        {
+        if (crouchAgent && cantUncrouchOverCeiling)
             _cantUncrouch = false;
-            _setCrouching = false;
-        }
+
+        if (crouchAgent && autoScaleOverCeiling)
+            UnCrouch();
+        
 
         if (isCeilingAbove)
             CeilingAboveHeadExit?.Invoke();
@@ -782,10 +777,13 @@ public class HumanoidMotor : MonoBehaviour
         {
             float targetHeight = crouchHeight;
 
-            if (crouchAgent && isCeilingAbove)
+            if (crouchAgent)
             {
                 if (autoScaleOverCeiling)
-                    targetHeight = GetAutoScaleCrouchHeight(_ceilingDistance);
+                {
+                    if (isCeilingAbove)
+                        targetHeight = GetAutoScaleCrouchHeight(_ceilingDistance);
+                }
             }
 
             bool crouch = TryCrouch(bodyCollider, bodyHeight, targetHeight);
@@ -956,8 +954,8 @@ public class HumanoidMotor : MonoBehaviour
         RaycastHit hitInfo;
         bool isChecked = Physics.SphereCast(
             origin,
-            checkRadius,
-            Vector3.down,
+            headRadius,
+            Vector3.up,
             out hitInfo,
             headMaxDistance,
             headLayer,
@@ -972,7 +970,7 @@ public class HumanoidMotor : MonoBehaviour
         else
         {
             isChecked = Physics.CheckSphere(
-                preOrigin + Vector3.down * feetSkin,
+                preOrigin + Vector3.up * feetSkin,
                 headRadius * 0.95f,
                 headLayer,
                 QueryTriggerInteraction.Ignore
