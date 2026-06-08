@@ -381,7 +381,11 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void UnCrouch()
     {
-        if (_agentForceSetCrouching || _cantUncrouch) return;
+        if (_agentForceSetCrouching) return;
+
+        if (cantUncrouchOverCeiling && isCeilingAbove) return;
+
+        if (_cantUncrouch) return;
 
         _setCrouching = false;
     }
@@ -483,13 +487,23 @@ public class HumanoidMotor : MonoBehaviour
         return 1.0f - Mathf.Exp(-speed * multiplier * Time.fixedDeltaTime);
     }
 
+    private bool IsCrouchAgentAllowed()
+    {
+        return crouchAgent && 
+            motorEnabled &&
+            humanoid.IsAlive &&
+            isGrounded &&
+            !humanoid.PlatformStanding &&
+            humanoid.StateType != HumanoidStateType.Airborne &&
+            humanoid.StateType != HumanoidStateType.FreeFalling &&
+            humanoid.StateType != HumanoidStateType.Jumping;
+    }
+
     private void CeilingIsAboveHelper()
     {
-        bool crouchAgentAllowed = false;
-        if (crouchAgent && canCrouch)
-            crouchAgentAllowed = true;
+        bool crouchAgentAllowed = IsCrouchAgentAllowed();
 
-        if (crouchAgentAllowed && autoScaleOverCeiling)
+        if (crouchAgentAllowed && autoScaleOverCeiling && canCrouch)
             _agentForceSetCrouching = true;
 
         if (crouchAgentAllowed && cantUncrouchOverCeiling)
@@ -501,9 +515,7 @@ public class HumanoidMotor : MonoBehaviour
 
     private void CeilingIsntAboveHelper()
     {
-        bool crouchAgentAllowed = false;
-        if (crouchAgent && canCrouch)
-            crouchAgentAllowed = true;
+        bool crouchAgentAllowed = IsCrouchAgentAllowed();
 
         if (crouchAgentAllowed && cantUncrouchOverCeiling)
             _cantUncrouch = false;
