@@ -64,10 +64,9 @@ public class HumanoidMotor : MonoBehaviour
     [Header("Crouch Agent")]
     [SerializeField] private bool crouchAgent = false;
     [SerializeField] private bool cantUncrouchOverCeiling = false;
-    [SerializeField] private bool autoScaleOverCeiling = false;
+    [SerializeField] private bool autoCrouchScaleOverCeiling = false;
     [SerializeField] private float autoScaleCrouchMultiplier = 0.2f;
-    [SerializeField] private float autoScaleSmoothCrouch = 0.12f;
-    [SerializeField] private float autoScaleMaxSpeed = 8f;
+    [SerializeField] private float autoScaleCrouchMaxSpeed = 8f;
 
     [Header("Prone")]
     [SerializeField] private float proneHeight = 0.5f;
@@ -76,6 +75,12 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private float unproneTransitionSpeed = 7.0f;
     [SerializeField] private float proneFuzzyEquivalence = 0.1f;
 
+    [Header("Prone Agent")]
+    [SerializeField] private bool proneAgent = false;
+    [SerializeField] private bool cantUnproneOverCeiling = false;
+    [SerializeField] private bool canOverrideCrouch = false;
+    [SerializeField] private float autoScaleProneMultiplier = 0.2f;
+    [SerializeField] private float autoScaleProneMaxSpeed = 8f;
 
     [Header("Mass")]
     [SerializeField] private float gravityScale = 1.0f;
@@ -119,14 +124,15 @@ public class HumanoidMotor : MonoBehaviour
     private bool jumpHolding;
     private bool motorEnabled = true;
 
-    private bool _crouched = false;
-    private bool _proned = false;
+    private bool _crouched;
+    private bool _proned;
 
-    private bool _cantUncrouch = false;
+    private bool _cantUncrouch;
+    private bool _cantUnprone;
 
-    private bool _crouchStandCenterObtained = false;
-    private bool _proneStandCenterObtained = false;
+    private bool _prone_override_crouch;
 
+    private bool _standCenterObtained;
 
     private bool isGrounded;
     private bool isCeilingAbove;
@@ -142,8 +148,6 @@ public class HumanoidMotor : MonoBehaviour
     private float _lastCeilingAboveTime;
     private float _lastJumpRequestTime;
     private float _lastJumpTime;
-    private float _lastCrouchTime;
-    private float _lastProneTime;
     private float _staminaUsedTimer;
     private float _groundIgnoreTimer;
     private float _idleStayingTimer;
@@ -373,7 +377,6 @@ public class HumanoidMotor : MonoBehaviour
             return;
 
         _setCrouching = true;
-        _lastCrouchTime = Time.time;
     }
 
     /// <summary>
@@ -388,6 +391,34 @@ public class HumanoidMotor : MonoBehaviour
         if (_cantUncrouch) return;
 
         _setCrouching = false;
+    }
+
+    /// <summary>
+    /// Setting Humanoid's collider to relative proning height
+    /// </summary>
+    public void Prone()
+    {
+        if (!motorEnabled || !canProne || _setCrouching)
+            return;
+
+        if (proneAgent && canOverrideCrouch)
+            _setCrouching = false;
+
+        _setProning = true;
+    }
+
+    /// <summary>
+    /// Stopping proning session of Humanoid
+    /// </summary>
+    public void UnProne()
+    {
+        if (_agentForceSetProning) return;
+
+        if (cantUnproneOverCeiling && isCeilingAbove) return;
+
+        if (_cantUnprone) return;
+
+        _setProning = true;
     }
 
     /// <summary>
@@ -418,6 +449,20 @@ public class HumanoidMotor : MonoBehaviour
             return;
         
         rigidBody.position = Location;
+        rigidBody.linearVelocity = Vector3.zero;
+        rigidBody.angularVelocity = Vector3.zero;
+    }
+    
+    /// <summary>
+    /// Translating transform of Humanoid position from relative position with current position to desired location matrix
+    /// </summary>
+    /// <param name="Matrix"></param>
+    public void Translate(Vector3 Matrix)
+    {
+        if (!humanoid.IsAlive)
+            return;
+        
+        rigidBody.position = rigidBody.position + Matrix;
         rigidBody.linearVelocity = Vector3.zero;
         rigidBody.angularVelocity = Vector3.zero;
     }
@@ -499,15 +544,36 @@ public class HumanoidMotor : MonoBehaviour
             humanoid.StateType != HumanoidStateType.Jumping;
     }
 
+    private bool IsProneAgentAllowed()
+    {
+        return proneAgent &&
+            motorEnabled &&
+            humanoid.IsAlive &&
+            isGrounded &&
+            !humanoid.PlatformStanding &&
+            humanoid.StateType != HumanoidStateType.Airborne &&
+            humanoid.StateType != HumanoidStateType.FreeFalling &&
+            humanoid.StateType != HumanoidStateType.Jumping;
+    }
+
     private void CeilingIsAboveHelper()
     {
         bool crouchAgentAllowed = IsCrouchAgentAllowed();
+        bool proneAgentAllowed = IsProneAgentAllowed();
 
-        if (crouchAgentAllowed && autoScaleOverCeiling && canCrouch)
-            _agentForceSetCrouching = true;
+        if (crouchAgentAllowed)
+        {
+            if (autoCrouchScaleOverCeiling && canCrouch)
+                _agentForceSetCrouching = true;
 
-        if (crouchAgentAllowed && cantUncrouchOverCeiling)
-            _cantUncrouch = true;
+            if (cantUncrouchOverCeiling)
+                _cantUncrouch = true;
+        }
+        
+        if (proneAgentAllowed)
+        {
+            
+        }
         
         CeilingAboveHead?.Invoke();
         isCeilingAbove = true;
@@ -520,7 +586,7 @@ public class HumanoidMotor : MonoBehaviour
         if (crouchAgentAllowed && cantUncrouchOverCeiling)
             _cantUncrouch = false;
 
-        if (crouchAgentAllowed && autoScaleOverCeiling)
+        if (crouchAgentAllowed && autoCrouchScaleOverCeiling)
             _agentForceSetCrouching = false;
 
         if (isCeilingAbove)
@@ -549,23 +615,23 @@ public class HumanoidMotor : MonoBehaviour
         return _currentCrouchHeight;
     }
 
-    private bool TryCrouch(Collider collider, float standingHeight, float crouchHeight)
+    private bool TryShrinkCollider(Collider collider, float standingHeight, float toHeight, float transitionSpeed, float autoScaleMultiplier, float fuzzyeq)
     {
         switch (collider)
         {
             case CapsuleCollider capsule:
             {
-                float targetHeight = crouchHeight;
-
-                if (!_crouchStandCenterObtained)
+                float targetHeight = toHeight;
+                if (!_standCenterObtained)
                 {
                     _standingCenter = capsule.center;
-                    _crouchStandCenterObtained = true;
+                    _standCenterObtained = true;
                 }
+
                 float standingBottom = standingHeight - targetHeight;
                 float targetY = _standingCenter.y - (standingBottom / 2);
 
-                float t = GetT(crouchTransitionSpeed, autoScaleCrouchMultiplier);
+                float t = GetT(transitionSpeed, autoScaleMultiplier);
                 Vector3 targetCenter = new Vector3(_standingCenter.x, targetY, _standingCenter.z);
 
                 float lerpHeight = Mathf.Lerp(capsule.height, targetHeight, t);
@@ -575,8 +641,8 @@ public class HumanoidMotor : MonoBehaviour
                 capsule.center = lerpCenter;
 
                 bool fuzzyEq = 
-                    Mathf.Abs(capsule.height - targetHeight) < crouchFuzzyEquivalence &&
-                    Vector3.Distance(capsule.center, targetCenter) < crouchFuzzyEquivalence;
+                    Mathf.Abs(capsule.height - targetHeight) < fuzzyeq &&
+                    Vector3.Distance(capsule.center, targetCenter) < fuzzyeq;
                 
                 if (fuzzyEq)
                 {
@@ -588,17 +654,17 @@ public class HumanoidMotor : MonoBehaviour
             
             case BoxCollider box:
             {
-                float targetHeight = crouchHeight;
+                float targetHeight = toHeight;
 
-                if (!_crouchStandCenterObtained)
+                if (!_standCenterObtained)
                 {
                     _standingCenter = box.center;
-                    _crouchStandCenterObtained = true;        
+                    _standCenterObtained = true;        
                 }
                 float standingBottom = standingHeight - targetHeight;
                 float targetY = _standingCenter.y - (standingBottom / 2);
 
-                float t = GetT(crouchTransitionSpeed, autoScaleCrouchMultiplier);
+                float t = GetT(transitionSpeed, autoScaleMultiplier);
                 Vector3 targetCenter = new Vector3(_standingCenter.x, targetY, _standingCenter.z);
                 
                 float lerpHeight = Mathf.Lerp(box.size.y, targetHeight, t);
@@ -611,8 +677,8 @@ public class HumanoidMotor : MonoBehaviour
                 box.center = lerpCenter;
 
                 bool fuzzyEq = 
-                    Mathf.Abs(box.size.y - targetHeight) < crouchFuzzyEquivalence &&
-                    Vector3.Distance(box.center, targetCenter) < crouchFuzzyEquivalence;
+                    Mathf.Abs(box.size.y - targetHeight) < fuzzyeq &&
+                    Vector3.Distance(box.center, targetCenter) < fuzzyeq;
                 
                 if (fuzzyEq)
                 {
@@ -626,20 +692,20 @@ public class HumanoidMotor : MonoBehaviour
 
             case SphereCollider sphere:
             {
-                float targetHeight = crouchHeight;
+                float targetHeight = toHeight;
                 float targetRadius = targetHeight / 2f;
 
-                if (!_crouchStandCenterObtained)
+                if (!_standCenterObtained)
                 {
                     _standingCenter = sphere.center;
-                    _crouchStandCenterObtained = true;
+                    _standCenterObtained = true;
                 }
                 float standingBottom = standingHeight / 2;
                 float radius_Delta = standingBottom - targetRadius;
 
                 float targetY = _standingCenter.y - radius_Delta;
 
-                float t = GetT(crouchTransitionSpeed, autoScaleCrouchMultiplier);
+                float t = GetT(transitionSpeed, autoScaleMultiplier);
                 Vector3 targetCenter = new Vector3(_standingCenter.x, targetY, _standingCenter.z);
 
                 float lerpHeight = Mathf.Lerp(sphere.radius, targetRadius, t);
@@ -649,8 +715,8 @@ public class HumanoidMotor : MonoBehaviour
                 sphere.center = lerpCenter;
 
                 bool fuzzyEq =
-                    Mathf.Abs(sphere.radius - targetHeight) < crouchFuzzyEquivalence &&
-                    Vector3.Distance(sphere.center, targetCenter) < crouchFuzzyEquivalence;
+                    Mathf.Abs(sphere.radius - targetHeight) < fuzzyeq &&
+                    Vector3.Distance(sphere.center, targetCenter) < fuzzyeq;
 
                 if (fuzzyEq)
                 {
@@ -666,7 +732,7 @@ public class HumanoidMotor : MonoBehaviour
         }
     }
 
-    private bool TryUncrouch(Collider collider, float standingHeight)
+    private bool TryStretchCollider(Collider collider, float standingHeight, float unTransitionSpeed, float autoScaleMultiplier, float fuzzyeq)
     {
         switch (collider)
         {
@@ -675,7 +741,7 @@ public class HumanoidMotor : MonoBehaviour
                 float targetHeight = standingHeight;
                 Vector3 targetCenter = _standingCenter;
                 
-                float t = GetT(uncrouchTransitionSpeed, autoScaleCrouchMultiplier);
+                float t = GetT(unTransitionSpeed, autoScaleMultiplier);
 
                 float lerpHeight = Mathf.Lerp(capsule.height, targetHeight, t);
                 Vector3 lerpCenter = Vector3.Lerp(capsule.center, targetCenter, t);
@@ -684,15 +750,15 @@ public class HumanoidMotor : MonoBehaviour
                 capsule.center = lerpCenter;
 
                 bool fuzzyEq = 
-                    Mathf.Abs(capsule.height - targetHeight) < crouchFuzzyEquivalence &&
-                    Vector3.Distance(capsule.center, targetCenter) < crouchFuzzyEquivalence;
+                    Mathf.Abs(capsule.height - targetHeight) < fuzzyeq &&
+                    Vector3.Distance(capsule.center, targetCenter) < fuzzyeq;
                 
                 if (fuzzyEq)
                 {
                     capsule.height = standingHeight;
                     capsule.center = targetCenter;
 
-                    _crouchStandCenterObtained = false;        
+                    _standCenterObtained = false;        
                 }
                 return true;
             }
@@ -702,7 +768,7 @@ public class HumanoidMotor : MonoBehaviour
                 float targetHeight = standingHeight;
                 Vector3 targetCenter = _standingCenter;
 
-                float t = GetT(uncrouchTransitionSpeed, autoScaleCrouchMultiplier);
+                float t = GetT(unTransitionSpeed, autoScaleMultiplier);
 
                 float lerpHeight = Mathf.Lerp(box.size.y, targetHeight, t);
                 Vector3 lerpCenter = Vector3.Lerp(box.center, targetCenter, t);
@@ -714,15 +780,15 @@ public class HumanoidMotor : MonoBehaviour
                 box.center = lerpCenter;
 
                 bool fuzzyEq =
-                    Mathf.Abs(box.size.y - targetHeight) < crouchFuzzyEquivalence &&
-                    Vector3.Distance(box.center, targetCenter) < crouchFuzzyEquivalence;
+                    Mathf.Abs(box.size.y - targetHeight) < fuzzyeq &&
+                    Vector3.Distance(box.center, targetCenter) < fuzzyeq;
                 
                 if (fuzzyEq)
                 {
                     box.size = new Vector3(box.size.x, targetHeight, box.size.z);
                     box.center = targetCenter;
 
-                    _crouchStandCenterObtained = false;        
+                    _standCenterObtained = false;        
                 }
 
                 return true;
@@ -733,7 +799,7 @@ public class HumanoidMotor : MonoBehaviour
                 float targetHeight = standingHeight;
                 Vector3 targetCenter = _standingCenter;
 
-                float t = GetT(uncrouchTransitionSpeed, autoScaleCrouchMultiplier);
+                float t = GetT(unTransitionSpeed, autoScaleMultiplier);
 
                 float lerpHeight = Mathf.Lerp(sphere.radius, targetHeight, t);
                 Vector3 lerpCenter = Vector3.Lerp(sphere.center, targetCenter, t);
@@ -742,15 +808,15 @@ public class HumanoidMotor : MonoBehaviour
                 sphere.center = lerpCenter;
 
                 bool fuzzyEq =
-                    Mathf.Abs(sphere.radius - targetHeight) < crouchFuzzyEquivalence &&
-                    Vector3.Distance(sphere.center, targetCenter) < crouchFuzzyEquivalence;
+                    Mathf.Abs(sphere.radius - targetHeight) < fuzzyeq &&
+                    Vector3.Distance(sphere.center, targetCenter) < fuzzyeq;
                 
                 if (fuzzyEq)
                 {
                     sphere.radius = targetHeight;
                     sphere.center = targetCenter;
 
-                    _crouchStandCenterObtained = false;        
+                    _standCenterObtained = false;        
                 }
 
                 return true;
@@ -821,40 +887,43 @@ public class HumanoidMotor : MonoBehaviour
         humanoid.TakeDamage(totalDamage);
     }
 
-    private void HandleCrouching()
+    private void HandleColliderExtension()
     {
         bool handleCrouch = _setCrouching || _agentForceSetCrouching;
+        bool handleProne = _setProning || _agentForceSetProning;
 
-        if (handleCrouch)
-        {
-            float targetHeight = crouchHeight;
+        
 
-            if (_agentForceSetCrouching && autoScaleOverCeiling && isCeilingAbove)
-                targetHeight = GetAutoScaleCrouchHeight(_ceilingDistance);
+        // if (handleCrouch)
+        // {
+        //     float targetHeight = crouchHeight;
 
-            bool crouch = TryCrouch(bodyCollider, bodyHeight, targetHeight);
+        //     if (_agentForceSetCrouching && autoCrouchScaleOverCeiling && isCeilingAbove)
+        //         targetHeight = GetAutoScaleCrouchHeight(_ceilingDistance);
 
-            if (crouch && !_crouched)
-                OnCrouchBegin?.Invoke();
+        //     bool crouch = TryShrinkCollider(bodyCollider, bodyHeight, targetHeight);
+
+        //     if (crouch && !_crouched)
+        //         OnCrouchBegin?.Invoke();
             
-            _crouched = true;
-            Crouching?.Invoke();
+        //     _crouched = true;
+        //     Crouching?.Invoke();
 
-            humanoid.ChangeState(HumanoidStateType.Crouch);
-            humanoid.SetHumanoidIsCrouching(true);
-        }
-        else
-        {
-            bool uncrouch = TryUncrouch(bodyCollider, bodyHeight);
+        //     humanoid.ChangeState(HumanoidStateType.Crouch);
+        //     humanoid.SetHumanoidIsCrouching(true);
+        // }
+        // else
+        // {
+        //     bool uncrouch = TryStretchCollider(bodyCollider, bodyHeight);
 
-            if (uncrouch && _crouched)
-                UnCrouched?.Invoke();
+        //     if (uncrouch && _crouched)
+        //         UnCrouched?.Invoke();
             
-            _crouched = false;
+        //     _crouched = false;
 
-            humanoid.ChangeState(HumanoidStateType.Idle);
-            humanoid.SetHumanoidIsCrouching(false);
-        }
+        //     humanoid.ChangeState(HumanoidStateType.Idle);
+        //     humanoid.SetHumanoidIsCrouching(false);
+        // }
     }
 
     private void HandleFallTracking()
@@ -1314,7 +1383,7 @@ public class HumanoidMotor : MonoBehaviour
 
         HandleSlopeSliding();
         HandleRotation();
-        HandleCrouching();
+        HandleColliderExtension();
 
         UpdateHumanoidRuntime();
     }
