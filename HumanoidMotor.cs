@@ -1,4 +1,5 @@
 using System;
+using UnityEditor.Rendering;
 using UnityEngine;
 
 [Serializable, RequireComponent(typeof(Humanoid)), RequireComponent(typeof(Rigidbody)), RequireComponent(typeof(Collider))]
@@ -16,6 +17,7 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private Collider bodyCollider;
     [SerializeField] private Transform groundCheck;
     [SerializeField] private Transform headCheck;
+    [SerializeField] private float bodyHeight = 2.0f;
 
     [Header("Movement")]
     [SerializeField] private float acceleration = 45.0f;
@@ -54,7 +56,6 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private float jumpCutMultiplier = 0.5f;
 
     [Header("Crouch")]
-    [SerializeField] private float bodyHeight = 2.0f;
     [SerializeField] private float crouchHeight = 1.0f;
     [SerializeField] private float crouchWalkingSpeed = 5.0f;
     [SerializeField] private float crouchTransitionSpeed = 6.0f;
@@ -68,6 +69,14 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private float autoScaleCrouchMultiplier = 0.2f;
     [SerializeField] private float autoScaleSmoothCrouch = 0.12f;
     [SerializeField] private float autoScaleMaxSpeed = 8f;
+
+    [Header("Prone")]
+    [SerializeField] private float proneHeight = 0.5f;
+    [SerializeField] private float proneWalkingSpeed = 3.0f;
+    [SerializeField] private float proneTransitionSpeed = 6.0f;
+    [SerializeField] private float unproneTransitionSpeed = 7.0f;
+    [SerializeField] private float proneFuzzyEquivalence = 0.1f;
+
 
     [Header("Mass")]
     [SerializeField] private float gravityScale = 1.0f;
@@ -373,7 +382,7 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void UnCrouch()
     {
-        if (_agentForceSetCrouching && _cantUncrouch) return;
+        if (_agentForceSetCrouching || _cantUncrouch) return;
 
         _setCrouching = false;
     }
@@ -477,10 +486,14 @@ public class HumanoidMotor : MonoBehaviour
 
     private void CeilingIsAboveHelper()
     {
-        if (crouchAgent && autoScaleOverCeiling)
+        bool crouchAgentAllowed = false;
+        if (crouchAgent && canCrouch)
+            crouchAgentAllowed = true;
+
+        if (crouchAgentAllowed && autoScaleOverCeiling)
             _agentForceSetCrouching = true;
 
-        if (crouchAgent && cantUncrouchOverCeiling)
+        if (crouchAgentAllowed && cantUncrouchOverCeiling)
             _cantUncrouch = true;
         
         CeilingAboveHead?.Invoke();
@@ -489,10 +502,14 @@ public class HumanoidMotor : MonoBehaviour
 
     private void CeilingIsntAboveHelper()
     {
-        if (crouchAgent && cantUncrouchOverCeiling)
+        bool crouchAgentAllowed = false;
+        if (crouchAgent && canCrouch)
+            crouchAgentAllowed = true;
+
+        if (crouchAgentAllowed && cantUncrouchOverCeiling)
             _cantUncrouch = false;
 
-        if (crouchAgent && autoScaleOverCeiling)
+        if (crouchAgentAllowed && autoScaleOverCeiling)
             _agentForceSetCrouching = false;
 
         if (isCeilingAbove)
@@ -808,7 +825,7 @@ public class HumanoidMotor : MonoBehaviour
 
             if (crouch && !_crouched)
                 OnCrouchBegin?.Invoke();
-
+            
             _crouched = true;
             Crouching?.Invoke();
 
@@ -1236,6 +1253,7 @@ public class HumanoidMotor : MonoBehaviour
             !humanoid.PlatformStanding &&
             humanoid.StateType != HumanoidStateType.Airborne &&
             humanoid.StateType != HumanoidStateType.FreeFalling &&
+            humanoid.StateType != HumanoidStateType.Jumping &&
             humanoid.StateType != HumanoidStateType.Prone &&
             isGrounded;
 
@@ -1244,6 +1262,7 @@ public class HumanoidMotor : MonoBehaviour
             !humanoid.PlatformStanding &&
             humanoid.StateType != HumanoidStateType.Airborne &&
             humanoid.StateType != HumanoidStateType.FreeFalling &&
+            humanoid.StateType != HumanoidStateType.Jumping &&
             humanoid.StateType != HumanoidStateType.Crouch &&
             isGrounded;
     }
