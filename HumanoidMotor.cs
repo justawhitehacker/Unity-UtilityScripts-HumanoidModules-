@@ -420,7 +420,6 @@ public class HumanoidMotor : MonoBehaviour
         if (_cantUnprone) return;
 
         _setProning = false;
-        _setCrouching = false;
     }
 
     /// <summary>
@@ -1011,6 +1010,11 @@ public class HumanoidMotor : MonoBehaviour
 
         if (crouchReady)
         {
+            float targetHeight = crouchHeight;
+
+            if (crouchAgent && autoCrouchScaleOverCeiling && isCeilingAbove)
+                targetHeight = GetAutoScaleCrouchHeight(_ceilingDistance);
+
             bool to = TryShrinkCollider(
                 bodyCollider,
                 bodyHeight,
@@ -1076,10 +1080,10 @@ public class HumanoidMotor : MonoBehaviour
             return;
 
         bool checkBlockedHeadOnCrouch = CheckVirtualHeadOfHeight(
-                crouchHeight,
-                virtualHeadRadiusMultiplier,
-                overrideCrouchDistance,
-                out _
+            crouchHeight,
+            virtualHeadRadiusMultiplier,
+            overrideCrouchDistance,
+            out _
         );
 
         if (checkBlockedHeadOnCrouch && canOverrideCrouch)
@@ -1092,10 +1096,10 @@ public class HumanoidMotor : MonoBehaviour
         }
 
         bool checkReturnCrouchHead = !CheckVirtualHeadOfHeight(
-                crouchHeight,
-                virtualHeadRadiusMultiplier,
-                returnCrouchClearDistance,
-                out _
+            crouchHeight,
+            virtualHeadRadiusMultiplier,
+            returnCrouchClearDistance,
+            out _
         );
 
         if (checkReturnCrouchHead)
