@@ -405,8 +405,9 @@ public class HumanoidMotor : MonoBehaviour
         if (!motorEnabled || !canProne)
             return;
 
-        _setProning = true;
+        _prone_override_crouch = false;
 
+        _setProning = true;
         _setCrouching = false;
     }
 
@@ -419,6 +420,7 @@ public class HumanoidMotor : MonoBehaviour
         if (cantUnproneOverCeiling && isCeilingAbove) return;
         if (_cantUnprone) return;
 
+        _prone_override_crouch = false;
         _setProning = false;
     }
 
@@ -1018,7 +1020,7 @@ public class HumanoidMotor : MonoBehaviour
             bool to = TryShrinkCollider(
                 bodyCollider,
                 bodyHeight,
-                crouchHeight,
+                targetHeight,
                 crouchTransitionSpeed,
                 autoScaleCrouchMultiplier,
                 crouchFuzzyEquivalence
@@ -1057,7 +1059,7 @@ public class HumanoidMotor : MonoBehaviour
             
             if (_proned)
                 UnProned?.Invoke();
-
+            
             _crouched = false;
             _proned = false;
 
@@ -1076,7 +1078,9 @@ public class HumanoidMotor : MonoBehaviour
 
         bool isOnCrouch = _setCrouching || _agentForceSetCrouching || humanoid.StateType == HumanoidStateType.Crouch;
 
-        if (!isOnCrouch)
+        bool isAgentOverriding = _prone_override_crouch && (_setProning || _agentForceSetProning || humanoid.StateType == HumanoidStateType.Prone);
+
+        if (!isOnCrouch && !isAgentOverriding)
             return;
 
         bool checkBlockedHeadOnCrouch = CheckVirtualHeadOfHeight(
@@ -1086,12 +1090,16 @@ public class HumanoidMotor : MonoBehaviour
             out _
         );
 
-        if (checkBlockedHeadOnCrouch && canOverrideCrouch)
+        if (checkBlockedHeadOnCrouch && canOverrideCrouch && isOnCrouch)
         {
             _agentForceSetCrouching = false;
 
             _agentForceSetProning = true;
             _cantUnprone = true;
+            _prone_override_crouch = true;
+
+            Debug.Log("Override Prone happened");
+
             return;
         }
 
@@ -1102,10 +1110,13 @@ public class HumanoidMotor : MonoBehaviour
             out _
         );
 
-        if (checkReturnCrouchHead)
+        if (checkReturnCrouchHead && _prone_override_crouch)
         {
             _agentForceSetProning = false;
             _cantUnprone = false;
+            _prone_override_crouch = false;
+
+            Debug.Log("Override Prone stopped");
 
             if (isCeilingAbove && crouchAgent && autoCrouchScaleOverCeiling)
                 _agentForceSetCrouching = true;
