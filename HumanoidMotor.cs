@@ -61,13 +61,8 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private float crouchTransitionSpeed = 6.0f;
     [SerializeField] private float uncrouchTransitionSpeed = 7.0f;
     [SerializeField] private float crouchFuzzyEquivalence = 0.1f;
-
-    [Header("Crouch Agent")]
-    [SerializeField] private bool crouchAgent = false;
     [SerializeField] private bool cantUncrouchOverCeiling = false;
-    [SerializeField] private bool autoCrouchScaleOverCeiling = false;
     [SerializeField] private float autoScaleCrouchMultiplier = 0.2f;
-    [SerializeField] private float autoScaleCrouchMaxSpeed = 8f;
 
     [Header("Prone")]
     [SerializeField] private float proneHeight = 0.5f;
@@ -75,18 +70,17 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private float proneTransitionSpeed = 6.0f;
     [SerializeField] private float unproneTransitionSpeed = 7.0f;
     [SerializeField] private float proneFuzzyEquivalence = 0.1f;
-
-    [Header("Prone Agent")]
-    [SerializeField] private bool proneAgent = false;
     [SerializeField] private bool cantUnproneOverCeiling = false;
-    [SerializeField] private bool canOverrideCrouch = false;
     [SerializeField] private float autoScaleProneMultiplier = 0.2f;
-    [SerializeField] private float autoScaleProneMaxSpeed = 8f;
 
-    [Header("Smart Prone-Crouch")]
-    [SerializeField] private float overrideCrouchDistance = 0.2f;
-    [SerializeField] private float returnCrouchClearDistance = 0.2f;
-    [SerializeField] private float virtualHeadRadiusMultiplier = 0.9f;
+    [Header("Dash")]
+    [SerializeField] private bool useCast = true;
+    [SerializeField] private bool dashOnlyOnGrounded = true;
+    [SerializeField] private bool dashStopMovement = true;
+    [SerializeField] private bool linearDashing = true;
+
+    [SerializeField] private float dashSpeed = 32.0f;
+    [SerializeField] private float dashCooldown = 0.8f;
 
     [Header("Mass")]
     [SerializeField] private float gravityScale = 1.0f;
@@ -107,11 +101,19 @@ public class HumanoidMotor : MonoBehaviour
 
     #region UnserializedReferences
 
+    private enum StanceIntent
+    {
+        Prone,
+        Crouch,
+        Standing
+    };
+
     private Vector3 _moveInput;
     private Vector3 _targetMoveDirection;
     private Vector3 groundNormal;
     private Vector3 moveDirection;
     private Vector3 lastMoveDirection;
+    private Vector3 _dashDirection;
 
     private Vector3 _standingCenter;
 
@@ -122,10 +124,7 @@ public class HumanoidMotor : MonoBehaviour
     private bool _jumpRequested;
 
     private bool _setCrouching;
-    private bool _agentForceSetCrouching; 
-
     private bool _setProning;
-    private bool _agentForceSetProning;
 
     private bool jumpHolding;
     private bool motorEnabled = true;
@@ -136,8 +135,6 @@ public class HumanoidMotor : MonoBehaviour
     private bool _cantUncrouch;
     private bool _cantUnprone;
 
-    private bool _prone_override_crouch;
-
     private bool _standCenterObtained;
 
     private bool isGrounded;
@@ -147,8 +144,6 @@ public class HumanoidMotor : MonoBehaviour
 
     private float fallStartY;
     private float fallDistance;
-
-    private float _ceilingDistance;
 
     private float _lastGroundedTime;
     private float _lastCeilingAboveTime;
@@ -163,12 +158,11 @@ public class HumanoidMotor : MonoBehaviour
     private int _movementLockCount;
     private int _jumpLockCount;
 
-    private float _currentCrouchHeight;
-
     private bool canMove;
     private bool canJump;
     private bool canCrouch;
     private bool canProne;
+    private bool canDash;
 
     #endregion
 
@@ -382,8 +376,7 @@ public class HumanoidMotor : MonoBehaviour
         if (!motorEnabled || !canCrouch)
             return;
 
-        _setCrouching = true;
-        _setProning = false;
+        SetCurrentStanceIntent(StanceIntent.Crouch);
     }
 
     /// <summary>
@@ -391,11 +384,10 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void UnCrouch()
     {
-        if (_agentForceSetCrouching) return;
         if (cantUncrouchOverCeiling && isCeilingAbove) return;
         if (_cantUncrouch) return;
 
-        _setCrouching = false;
+        SetCurrentStanceIntent(StanceIntent.Standing);
     }
 
     /// <summary>
@@ -406,10 +398,8 @@ public class HumanoidMotor : MonoBehaviour
         if (!motorEnabled || !canProne)
             return;
 
-        _prone_override_crouch = false;
 
-        _setProning = true;
-        _setCrouching = false;
+        SetCurrentStanceIntent(StanceIntent.Prone);
     }
 
     /// <summary>
@@ -417,12 +407,10 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void UnProne()
     {
-        if (_agentForceSetProning && !_prone_override_crouch) return;
         if (cantUnproneOverCeiling && isCeilingAbove) return;
-        if (_cantUnprone && !_prone_override_crouch) return;
-
-        _prone_override_crouch = false;
-        _setProning = false;
+        if (_cantUnprone) return;
+        
+        SetCurrentStanceIntent(StanceIntent.Standing);
     }
 
     /// <summary>
@@ -547,150 +535,63 @@ public class HumanoidMotor : MonoBehaviour
             humanoid.StateType != HumanoidStateType.Jumping;
     }
 
-    private bool IsCrouchAgentAllowed()
+    private void SetCurrentStanceIntent(StanceIntent intent)
     {
-        return crouchAgent && 
-            motorEnabled &&
-            humanoid.IsAlive &&
-            isGrounded &&
-            !humanoid.PlatformStanding &&
-            humanoid.StateType != HumanoidStateType.Airborne &&
-            humanoid.StateType != HumanoidStateType.FreeFalling &&
-            humanoid.StateType != HumanoidStateType.Jumping;
-    }
+        switch (intent)
+        {
+            case StanceIntent.Standing:
+            {
+                _setCrouching = false;
+                _setProning = false;
 
-    private bool IsProneAgentAllowed()
-    {
-        return proneAgent &&
-            motorEnabled &&
-            humanoid.IsAlive &&
-            isGrounded &&
-            !humanoid.PlatformStanding &&
-            humanoid.StateType != HumanoidStateType.Airborne &&
-            humanoid.StateType != HumanoidStateType.FreeFalling &&
-            humanoid.StateType != HumanoidStateType.Jumping;
+                _cantUncrouch = false;
+                _cantUnprone = false;
+
+                break;        
+            }
+
+            case StanceIntent.Crouch:
+            {
+                _setCrouching = true;
+                _setProning = false;
+
+                break;        
+            }
+
+            case StanceIntent.Prone:
+            {
+                _setCrouching = false;
+                _setProning = true;
+
+                break;        
+            }
+        }
     }
 
     private void CeilingIsAboveHelper()
     {
-        bool crouchAgentAllowed = IsCrouchAgentAllowed();
-        bool proneAgentAllowed = IsProneAgentAllowed();
-
-        if (crouchAgentAllowed)
-        {
-            bool canForceCrouch = !_setProning || !_agentForceSetProning || humanoid.StateType != HumanoidStateType.Prone;
-
-            if (autoCrouchScaleOverCeiling && canCrouch && canForceCrouch)
-                _agentForceSetCrouching = true;
-
-            if (cantUncrouchOverCeiling)
-                _cantUncrouch = true;
-        }
+        if (cantUncrouchOverCeiling)
+            _cantUncrouch = true;
         
-        if (proneAgentAllowed)
-        {
-            if (cantUnproneOverCeiling)
-                _cantUnprone = true;
-        }
-        
+        if (cantUnproneOverCeiling)
+            _cantUnprone = true;
+
         CeilingAboveHead?.Invoke();
         isCeilingAbove = true;
     }
 
     private void CeilingIsntAboveHelper()
     {
-        bool crouchAgentAllowed = IsCrouchAgentAllowed();
-        bool proneAgentAllowed = IsProneAgentAllowed();
-
-        if (crouchAgentAllowed)
-        {
-            if (cantUncrouchOverCeiling)
-                _cantUncrouch = false;
-
-            if (autoCrouchScaleOverCeiling)
-                _agentForceSetCrouching = false;
-        }
-
-        if (proneAgentAllowed)
-        {
-            if (cantUnproneOverCeiling)
-                _cantUnprone = false;
-        }
+        _cantUncrouch = false;
+        _cantUnprone = false;
 
         if (isCeilingAbove)
             CeilingAboveHeadExit?.Invoke();
         
-        _ceilingDistance = Mathf.Infinity;
         isCeilingAbove = false;
     }
 
-    private Vector3 GetVirtualColliderCenter(float targetHeight)
-    {
-        Vector3 currentStandingCenter = _standCenterObtained ? _standingCenter : GetColliderCenter(bodyCollider);
-
-        float yOffset = (bodyHeight - targetHeight) / 2.0f;
-        Vector3 newStandingCenter = currentStandingCenter;
-        newStandingCenter.y -= yOffset;
-
-        return newStandingCenter;
-    }
-
-    private Vector3 GetColliderCenter(Collider collider)
-    {
-        switch (collider)
-        {
-            case CapsuleCollider capsule:
-                return capsule.center;
-            
-            case BoxCollider box:
-                return box.center;
-
-            case SphereCollider sphere:
-                return sphere.center;
-
-            default:
-                return Vector3.zero;
-        }
-    }
-
-    private float GetColliderRadius(Collider collider)
-    {
-        switch (collider)
-        {
-            case CapsuleCollider capsule:
-                return capsule.radius;
-            
-            case BoxCollider box:
-                return Mathf.Min(box.size.x, box.size.z) / 2.0f;
-
-            case SphereCollider sphere:
-                return sphere.radius;
-            
-            default:
-                return headRadius;
-        }
-    }
-
-    private bool CheckVirtualHeadOfHeight(float virtualHeight, float radiusMultiplier, float maxVirtualDistance, out RaycastHit hit)
-    {
-        float normalRadius = GetColliderRadius(bodyCollider);
-        float radius = Mathf.Min(headRadius, normalRadius * radiusMultiplier);
-
-        Vector3 virtualCenter = GetVirtualColliderCenter(virtualHeight);
-
-        Vector3 localSpacedVirtualHeadCenter = virtualCenter + Vector3.up * ((virtualHeight / 2.0f) - radius - headSkin);
-        Vector3 worldSpacedVirtualHeadCenter = rootPart.TransformPoint(localSpacedVirtualHeadCenter);
-
-        return Physics.SphereCast(
-            worldSpacedVirtualHeadCenter,
-            radius,
-            Vector3.up,
-            out hit,
-            maxVirtualDistance,
-            headLayer,
-            QueryTriggerInteraction.Ignore
-        );
-    }
+    
 
     private Vector3 GetGroundBottomOnWorld(Collider collider)
     {
@@ -700,7 +601,7 @@ public class HumanoidMotor : MonoBehaviour
             {
                 Vector3 center = rootPart.TransformPoint(capsule.center);
                 float halfHeight = capsule.height / 2.0f;
-                return center - Vector3.up * halfHeight;
+                return center - rootPart.up * halfHeight;
             }
 
             case BoxCollider box:
@@ -722,23 +623,34 @@ public class HumanoidMotor : MonoBehaviour
         }
     }
 
-    private float GetAutoScaleCrouchHeight(float ceilingDistance)
+    private Vector3 GetHeadTopOnWorld(Collider collider)
     {
-        float availableHeight = ceilingDistance - headSkin;
-        float rawHeight = Mathf.Clamp(availableHeight, crouchHeight, bodyHeight);
+        switch(collider)
+        {
+            case CapsuleCollider capsule:
+            {
+                Vector3 center = rootPart.TransformPoint(capsule.center);
+                return center + rootPart.up * capsule.radius;
+            }
 
-        _currentCrouchHeight = _currentCrouchHeight <= 0f ? bodyHeight : _currentCrouchHeight;
+            case BoxCollider box:
+            {
+                Vector3 center = rootPart.TransformPoint(box.center);
+                return center + rootPart.up * (box.size.y /2.0f);
+            }
 
-        float speed = rawHeight < _currentCrouchHeight ?
-            crouchTransitionSpeed : uncrouchTransitionSpeed;
-        
-        _currentCrouchHeight = Mathf.MoveTowards(
-            _currentCrouchHeight,
-            rawHeight,
-            speed * Time.fixedDeltaTime
-        );
+            case SphereCollider sphere:
+            {
+                Vector3 center = rootPart.TransformPoint(sphere.center);
+                return center + rootPart.up * sphere.radius;
+            }
 
-        return _currentCrouchHeight;
+            default:
+            {
+                Bounds bounds = collider.bounds;
+                return new Vector3(bounds.center.x, bounds.max.y, bounds.center.z);
+            }
+        }
     }
 
     private bool TryShrinkCollider(Collider collider, float standingHeight, float toHeight, float transitionSpeed, float autoScaleMultiplier, float fuzzyeq)
@@ -1015,8 +927,8 @@ public class HumanoidMotor : MonoBehaviour
 
     private void HandleColliderExtension()
     {
-        bool proneReady = _setProning || _agentForceSetProning;
-        bool crouchReady = !proneReady && (_setCrouching || _agentForceSetCrouching);
+        bool proneReady = _setProning;
+        bool crouchReady = !proneReady && _setCrouching;
 
         if (proneReady)
         {
@@ -1031,9 +943,9 @@ public class HumanoidMotor : MonoBehaviour
 
             if (to && !_proned)
                 OnProneBegin?.Invoke();
-            
-            _crouched = false;
+
             _proned = true;
+            _crouched = false;
             Proning?.Invoke();
 
             humanoid.ChangeState(HumanoidStateType.Prone);
@@ -1045,15 +957,10 @@ public class HumanoidMotor : MonoBehaviour
 
         if (crouchReady)
         {
-            float targetHeight = crouchHeight;
-
-            if (crouchAgent && autoCrouchScaleOverCeiling && isCeilingAbove)
-                targetHeight = GetAutoScaleCrouchHeight(_ceilingDistance);
-
             bool to = TryShrinkCollider(
                 bodyCollider,
                 bodyHeight,
-                targetHeight,
+                crouchHeight,
                 crouchTransitionSpeed,
                 autoScaleCrouchMultiplier,
                 crouchFuzzyEquivalence
@@ -1101,79 +1008,6 @@ public class HumanoidMotor : MonoBehaviour
 
             if (humanoid.StateType == HumanoidStateType.Crouch || humanoid.StateType == HumanoidStateType.Prone)
                 humanoid.ChangeState(HumanoidStateType.Idle);
-        }
-    }
-
-    private void HandleStance()
-    {
-        if (!IsProneAgentAllowed())
-        {
-            Debug.Log("ProneAgent Unallowed");
-            return;
-        }
-
-        if (_prone_override_crouch)
-        {
-            bool checkReturnCrouchHead = !CheckVirtualHeadOfHeight(
-                crouchHeight,
-                virtualHeadRadiusMultiplier,
-                returnCrouchClearDistance,
-                out _
-            );
-
-            Debug.Log("Prone trying to be ended or back to crouch");
-
-            if (checkReturnCrouchHead)
-            {
-                _agentForceSetProning = false;
-                _cantUnprone = false;
-                _prone_override_crouch = false;
-
-                _agentForceSetCrouching = false;
-
-                Debug.Log("Standing back");
-
-                return;
-            }
-
-            _agentForceSetCrouching = false;
-            
-            _agentForceSetProning = true;
-            _cantUnprone = true;
-            
-            Debug.Log("Still proning");
-
-            return;
-        }
-
-        bool isOnCrouch = _setCrouching || _agentForceSetCrouching || humanoid.StateType == HumanoidStateType.Crouch;
-
-        if (!isOnCrouch)
-        {
-            Debug.Log("Dead end here");
-            return;
-        }
-
-        bool checkBlockedHeadOnCrouch = CheckVirtualHeadOfHeight(
-            crouchHeight,
-            virtualHeadRadiusMultiplier,
-            overrideCrouchDistance,
-            out _
-        );
-
-        Debug.Log("Ready to overriding Crouch");
-
-        if (checkBlockedHeadOnCrouch && canOverrideCrouch)
-        {
-             _agentForceSetCrouching = false;
-
-            _agentForceSetProning = true;
-            _cantUnprone = true;
-            _prone_override_crouch = true;
-
-            Debug.Log("Prone overrode crouch");
-
-            return;
         }
     }
 
@@ -1257,7 +1091,6 @@ public class HumanoidMotor : MonoBehaviour
             groundCheck.position : rootPart.position;
         
         Vector3 worldBottom = GetGroundBottomOnWorld(bodyCollider);
-
         preOrigin = humanoid.StateType == HumanoidStateType.Crouch || humanoid.StateType == HumanoidStateType.Prone ?
             worldBottom : preOrigin;
 
@@ -1322,6 +1155,10 @@ public class HumanoidMotor : MonoBehaviour
         Vector3 preOrigin = headCheck != null ?
             headCheck.position : rootPart.position;
 
+        Vector3 worldTop = GetHeadTopOnWorld(bodyCollider);
+        preOrigin = humanoid.StateType == HumanoidStateType.Prone ?
+            worldTop : preOrigin;
+
         Vector3 origin = multiplier + preOrigin;
 
         RaycastHit hitInfo;
@@ -1337,7 +1174,6 @@ public class HumanoidMotor : MonoBehaviour
 
         if (isChecked)
         {
-            _ceilingDistance = hitInfo.distance;
             CeilingIsAboveHelper();
         }
         else
@@ -1356,7 +1192,6 @@ public class HumanoidMotor : MonoBehaviour
 
                 if (ray)
                 {
-                    _ceilingDistance = alternateHit.distance;
                     CeilingIsAboveHelper();
                 }
                 else
@@ -1590,6 +1425,12 @@ public class HumanoidMotor : MonoBehaviour
         canCrouch = humanoid.CanCrouch && CanUsePoseInput();
 
         canProne = humanoid.CanProne && CanUsePoseInput();
+
+        canDash = humanoid.CanDash &&
+            humanoid.IsAlive &&
+            !humanoid.PlatformStanding &&
+            humanoid.StateType != HumanoidStateType.Crouch &&
+            humanoid.StateType != HumanoidStateType.Prone;
     }
 
     #endregion
@@ -1613,7 +1454,10 @@ public class HumanoidMotor : MonoBehaviour
     private void FixedUpdate()
     {
         if (!motorEnabled || !humanoid.IsAlive)
+        {   
+            StopMove();
             return;
+        }
         
         CheckGround();
         CheckHead();
@@ -1623,7 +1467,6 @@ public class HumanoidMotor : MonoBehaviour
         HandleJump();
         HandleMovement();
         HandleMass();
-        HandleStance();
 
         HandleFallTracking();
 
@@ -1632,33 +1475,6 @@ public class HumanoidMotor : MonoBehaviour
         HandleColliderExtension();
 
         UpdateHumanoidRuntime();
-    }
-
-    private void OnDrawGizmosSelected() 
-    {
-        // head and feet
-        Gizmos.color = Color.red;
-        Gizmos.DrawWireSphere(headCheck.position + Vector3.down * (headRadius * headSkin), headRadius);
-        Gizmos.color = Color.orange;
-        Gizmos.DrawWireSphere(groundCheck.position + Vector3.up * (checkRadius * feetSkin), checkRadius);
-
-        // virtual head and virtual feet
-        Vector3 virtualCenter = GetVirtualColliderCenter(crouchHeight);
-        Vector3 virtualHeadCenter = rootPart.TransformPoint(virtualCenter + Vector3.up * ((crouchHeight / 2.0f) - virtualHeadRadiusMultiplier - headSkin));
-
-        float normalRadius = GetColliderRadius(bodyCollider);
-        float radius = Mathf.Min(headRadius, normalRadius * virtualHeadRadiusMultiplier);  
-
-        Vector3 multiplier = Vector3.up * (checkRadius + feetSkin);
-        Vector3 preOrigin = GetGroundBottomOnWorld(bodyCollider);
-
-        Vector3 virtualFeetCenter = preOrigin + multiplier;
-
-        Gizmos.color = Color.green;
-        Gizmos.DrawWireSphere(virtualHeadCenter, radius);
-
-        Gizmos.color = Color.violet;
-        Gizmos.DrawWireSphere(virtualFeetCenter, checkRadius);
     }
 
     private void Reset()
