@@ -78,7 +78,6 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private bool dashOnlyOnGrounded = true;
     [SerializeField] private bool dashStopMovement = true;
     [SerializeField] private bool dashLinearDashing = true;
-    [SerializeField] private bool dashUseMass = false;
 
     [SerializeField] private LayerMask dashCastMask;
 
@@ -153,7 +152,6 @@ public class HumanoidMotor : MonoBehaviour
     private float fallDistance;
 
     private float _lastGroundedTime;
-    private float _lastCeilingAboveTime;
     private float _lastJumpRequestTime;
     private float _lastJumpTime;
     private float _dashEndTime;
@@ -633,9 +631,6 @@ public class HumanoidMotor : MonoBehaviour
                 _setCrouching = false;
                 _setProning = false;
 
-                _cantUncrouch = false;
-                _cantUnprone = false;
-
                 break;        
             }
 
@@ -649,8 +644,8 @@ public class HumanoidMotor : MonoBehaviour
 
             case StanceIntent.Prone:
             {
-                _setCrouching = false;
                 _setProning = true;
+                _setCrouching = false;
 
                 break;        
             }
@@ -1265,12 +1260,6 @@ public class HumanoidMotor : MonoBehaviour
     {
         bool oldCeilingAbove = isCeilingAbove;
 
-        if (Time.time < _lastCeilingAboveTime)
-        {
-            CeilingIsntAboveHelper();
-            return;
-        }
-
         Vector3 multiplier = Vector3.down * (headRadius + headSkin);
         Vector3 preOrigin = headCheck != null ?
             headCheck.position : rootPart.position;
@@ -1607,6 +1596,18 @@ public class HumanoidMotor : MonoBehaviour
         rigidBody.freezeRotation = true;
         rigidBody.useGravity = false;
         rigidBody.interpolation = RigidbodyInterpolation.Interpolate;
+
+        _setCrouching = false;
+        _setProning = false;
+        _crouched = false;
+        _proned = false;
+        _cantUncrouch = false;
+        _cantUnprone = false;
+        _jumpRequested = false;
+        _standCenterObtained = false;
+        _isDashing = false;
+        isCeilingAbove = false;
+        isGrounded = false;
 
         _idleStayingTimer = Time.time;
     }
