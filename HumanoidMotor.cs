@@ -74,13 +74,19 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private float autoScaleProneMultiplier = 0.2f;
 
     [Header("Dash")]
-    [SerializeField] private bool useCast = true;
+    [SerializeField] private bool dashUseCast = true;
     [SerializeField] private bool dashOnlyOnGrounded = true;
     [SerializeField] private bool dashStopMovement = true;
-    [SerializeField] private bool linearDashing = true;
+    [SerializeField] private bool dashLinearDashing = true;
+    [SerializeField] private bool dashUseMass = false;
+
+    [SerializeField] private LayerMask dashCastMask;
 
     [SerializeField] private float dashSpeed = 32.0f;
     [SerializeField] private float dashCooldown = 0.8f;
+    [SerializeField] private float dashCheckSkin = 0.05f;
+    [SerializeField] private float dashDuration = 0.65f;
+    [SerializeField] private float dashMinDistance = 0.2f;
 
     [Header("Mass")]
     [SerializeField] private float gravityScale = 1.0f;
@@ -122,6 +128,7 @@ public class HumanoidMotor : MonoBehaviour
 
     private bool _runReady;
     private bool _jumpRequested;
+    private bool _isDashing;
 
     private bool _setCrouching;
     private bool _setProning;
@@ -149,6 +156,9 @@ public class HumanoidMotor : MonoBehaviour
     private float _lastCeilingAboveTime;
     private float _lastJumpRequestTime;
     private float _lastJumpTime;
+    private float _dashEndTime;
+    private float _lastDashed = -999f;
+
     private float _staminaUsedTimer;
     private float _groundIgnoreTimer;
     private float _idleStayingTimer;
@@ -171,23 +181,26 @@ public class HumanoidMotor : MonoBehaviour
     public event Action Grounded;
     public event Action Landed;
     public event Action Sliding;
-    public event Action UnCrouched;
-    public event Action UnProned;
 
-    public event Action Crouching;
-    public event Action Proning;
-    
     public event Action OnCrouchBegin;
     public event Action OnProneBegin;
     public event Action OnAirborneBegin;
     public event Action OnFreeFallingBegin;
+    public event Action OnDashBegin;
     public event Action CeilingAboveHeadEnter;
-    public event Action CeilingAboveHead;
-    public event Action CeilingAboveHeadExit;
 
     public event Action OnAirborne;
     public event Action OnFreeFalling;
     public event Action OnJumping;
+    public event Action OnDashing;
+    public event Action Proning;
+    public event Action Crouching;
+    public event Action CeilingAboveHead;
+
+    public event Action OnDashEnded;
+    public event Action UnCrouched;
+    public event Action UnProned;
+    public event Action CeilingAboveHeadExit;
 
     public event Action<Vector3> OnWalking;
     public event Action<Vector3> OnRunning;
@@ -413,6 +426,79 @@ public class HumanoidMotor : MonoBehaviour
         SetCurrentStanceIntent(StanceIntent.Standing);
     }
 
+    public void Dash(Vector3 Direction)
+    {
+        if (!motorEnabled || !canDash)
+            return;
+
+        if (dashOnlyOnGrounded && !isGrounded)
+            return;
+
+        if (Time.time - _lastDashed <= dashCooldown)
+            return;
+
+        Vector3 _direction = Direction;
+        _direction.y = 0f;
+
+        if (_direction.sqrMagnitude <= 0.001f)
+            _direction = lastMoveDirection.sqrMagnitude > 0.001f ? lastMoveDirection : humanoid.FacingDirection;
+
+        _direction.y = 0f;
+
+        if (_direction.sqrMagnitude <= 0.001f)
+            return;
+
+        _direction.Normalize();
+
+        if (isGrounded && isOnSlope && !isSliding)
+            _direction = Vector3.ProjectOnPlane(_direction, groundNormal).normalized;
+
+        float expDistance = dashSpeed * dashDuration;
+
+        if (dashUseCast)
+        {
+            float nearestSafeDistance = TestObstacleForDash(_direction, expDistance);
+
+            if (nearestSafeDistance < dashMinDistance)
+                return;
+
+            float allowedDuration = nearestSafeDistance / dashSpeed;
+            _dashEndTime = Time.time + Mathf.Min(dashDuration, allowedDuration);
+        }
+        else
+        {
+            _dashEndTime = Time.time + dashDuration;
+        }
+
+        _dashDirection = _direction;
+        _lastDashed = Time.time;
+        _isDashing = true;
+
+        OnDashBegin?.Invoke();
+
+        if (dashStopMovement)
+            StopMove();
+    }
+
+    public void StopDash()
+    {
+        if (!_isDashing)
+            return;
+
+        _isDashing = false;
+        _dashDirection = Vector3.zero;
+
+        Vector3 velocity = rigidBody.linearVelocity;
+
+        velocity.x = 0f;
+        velocity.y = 0f;
+
+        rigidBody.linearVelocity = velocity;
+
+        OnDashEnded?.Invoke();
+    }
+
+
     /// <summary>
     /// Giving impulse force to Humanoid
     /// </summary>
@@ -566,6 +652,37 @@ public class HumanoidMotor : MonoBehaviour
                 break;        
             }
         }
+    }
+
+    private float TestObstacleForDash(Vector3 direction, float targetDistance)
+    {
+        RaycastHit[] newHits = rigidBody.SweepTestAll(
+            direction,
+            targetDistance + dashCheckSkin,
+            QueryTriggerInteraction.Ignore
+        );
+
+        float mostNearestDistance = targetDistance;
+
+        for (int i = 0; i <= newHits.Length; i++)
+        {
+            RaycastHit _hitted = newHits[i];
+
+            if (_hitted.collider == null || _hitted.collider == bodyCollider)
+                continue;
+
+            bool isAnObstacle = (dashCastMask.value & (1 << _hitted.collider.gameObject.layer)) != 0;
+
+            if (!isAnObstacle)
+                continue;
+
+            float safeDistance = Mathf.Max(0f, _hitted.distance - dashCheckSkin);
+
+            if (safeDistance < mostNearestDistance)
+                mostNearestDistance = safeDistance;
+        }
+
+        return mostNearestDistance;
     }
 
     private void CeilingIsAboveHelper()
@@ -1210,6 +1327,9 @@ public class HumanoidMotor : MonoBehaviour
 
     private void HandleMovement()
     {
+        if (_isDashing && dashStopMovement)
+            return;
+        
         Vector3 velocity = rigidBody.linearVelocity;
         Vector3 horizontalVelocity = velocity;
         horizontalVelocity.y = 0f;
@@ -1267,6 +1387,7 @@ public class HumanoidMotor : MonoBehaviour
             humanoid.StateType != HumanoidStateType.FreeFalling && 
             humanoid.StateType != HumanoidStateType.Crouch &&
             humanoid.StateType != HumanoidStateType.Prone &&
+            humanoid.StateType != HumanoidStateType.Lunging &&
             isGrounded)
             humanoid.ChangeState(_runReady ? HumanoidStateType.Running : HumanoidStateType.Walking);
 
@@ -1325,6 +1446,41 @@ public class HumanoidMotor : MonoBehaviour
 
         humanoid.ChangeState(HumanoidStateType.Jumping);
         OnJumping?.Invoke();
+    }
+
+    private void HandleDashing()
+    {
+        if (!_isDashing)
+            return;
+
+        if (Time.time >= _dashEndTime)
+        {
+            StopDash();
+            return;
+        }
+        
+        if (dashUseCast)
+        {
+            float stepDistance = dashSpeed * Time.fixedDeltaTime;
+            float targetDistance = TestObstacleForDash(_dashDirection, stepDistance);
+
+            if (targetDistance <= dashCastMask)
+            {
+                StopDash();
+                return;
+            }
+        }
+
+        Vector3 velocity = rigidBody.linearVelocity;
+        Vector3 dashVelocity = _dashDirection * Time.fixedDeltaTime;
+
+        velocity.x = dashVelocity.x;
+        velocity.z = dashVelocity.y;
+
+        if (!dashLinearDashing)
+            velocity.y = 0f;
+
+        rigidBody.linearVelocity = velocity;
     }
 
     private void HandleMass()
@@ -1467,9 +1623,9 @@ public class HumanoidMotor : MonoBehaviour
         HandleJump();
         HandleMovement();
         HandleMass();
+        HandleDashing();
 
         HandleFallTracking();
-
         HandleSlopeSliding();
         HandleRotation();
         HandleColliderExtension();
