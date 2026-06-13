@@ -386,7 +386,7 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void Crouch()
     {
-        if (!motorEnabled || !canCrouch)
+        if (!motorEnabled || !canCrouch || _isDashing)
             return;
 
         SetCurrentStanceIntent(StanceIntent.Crouch);
@@ -408,7 +408,7 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     public void Prone()
     {
-        if (!motorEnabled || !canProne)
+        if (!motorEnabled || !canProne || _isDashing)
             return;
 
 
@@ -473,7 +473,8 @@ public class HumanoidMotor : MonoBehaviour
         _dashDirection = _direction;
         _lastDashed = Time.time;
         _isDashing = true;
-
+        
+        humanoid.ChangeState(HumanoidStateType.Lunging);
         OnDashBegin?.Invoke();
 
         if (dashStopMovement)
@@ -491,10 +492,11 @@ public class HumanoidMotor : MonoBehaviour
         Vector3 velocity = rigidBody.linearVelocity;
 
         velocity.x = 0f;
-        velocity.y = 0f;
+        velocity.z = 0f;
 
         rigidBody.linearVelocity = velocity;
 
+        humanoid.ChangeState(HumanoidStateType.Idle);
         OnDashEnded?.Invoke();
     }
 
@@ -618,7 +620,8 @@ public class HumanoidMotor : MonoBehaviour
             !humanoid.PlatformStanding &&
             humanoid.StateType != HumanoidStateType.Airborne &&
             humanoid.StateType != HumanoidStateType.FreeFalling &&
-            humanoid.StateType != HumanoidStateType.Jumping;
+            humanoid.StateType != HumanoidStateType.Jumping &&
+            humanoid.StateType != HumanoidStateType.Lunging;
     }
 
     private void SetCurrentStanceIntent(StanceIntent intent)
@@ -664,7 +667,7 @@ public class HumanoidMotor : MonoBehaviour
 
         float mostNearestDistance = targetDistance;
 
-        for (int i = 0; i <= newHits.Length; i++)
+        for (int i = 0; i < newHits.Length; i++)
         {
             RaycastHit _hitted = newHits[i];
 
@@ -1172,7 +1175,7 @@ public class HumanoidMotor : MonoBehaviour
             {
                 if (humanoid.StateType != HumanoidStateType.Airborne)
                 {
-                    if (humanoid.StateType != HumanoidStateType.Crouch && humanoid.StateType != HumanoidStateType.Prone)
+                    if (humanoid.StateType != HumanoidStateType.Crouch && humanoid.StateType != HumanoidStateType.Prone && humanoid.StateType != HumanoidStateType.Lunging)
                     {
                         if (_targetMoveDirection.sqrMagnitude <= 0.001f)
                         {
@@ -1278,12 +1281,11 @@ public class HumanoidMotor : MonoBehaviour
 
         Vector3 origin = multiplier + preOrigin;
 
-        RaycastHit hitInfo;
         bool isChecked = Physics.SphereCast(
             origin,
             headRadius,
             Vector3.up,
-            out hitInfo,
+            out _,
             headMaxDistance,
             headLayer,
             QueryTriggerInteraction.Ignore
@@ -1304,8 +1306,7 @@ public class HumanoidMotor : MonoBehaviour
 
             if (isChecked)
             {
-                RaycastHit alternateHit;
-                bool ray = Physics.Raycast(origin, Vector3.up, out alternateHit, headMaxDistance + headRadius + headSkin, headLayer, QueryTriggerInteraction.Ignore);
+                bool ray = Physics.Raycast(origin, Vector3.up, out _, headMaxDistance + headRadius + headSkin, headLayer, QueryTriggerInteraction.Ignore);
 
                 if (ray)
                 {
@@ -1464,7 +1465,7 @@ public class HumanoidMotor : MonoBehaviour
             float stepDistance = dashSpeed * Time.fixedDeltaTime;
             float targetDistance = TestObstacleForDash(_dashDirection, stepDistance);
 
-            if (targetDistance <= dashCastMask)
+            if (targetDistance < dashMinDistance)
             {
                 StopDash();
                 return;
@@ -1472,15 +1473,18 @@ public class HumanoidMotor : MonoBehaviour
         }
 
         Vector3 velocity = rigidBody.linearVelocity;
-        Vector3 dashVelocity = _dashDirection * Time.fixedDeltaTime;
+        Vector3 dashVelocity = _dashDirection * dashSpeed;
 
         velocity.x = dashVelocity.x;
-        velocity.z = dashVelocity.y;
+        velocity.z = dashVelocity.z;
 
         if (!dashLinearDashing)
             velocity.y = 0f;
 
         rigidBody.linearVelocity = velocity;
+
+        humanoid.ChangeState(HumanoidStateType.Lunging);
+        OnDashing?.Invoke();
     }
 
     private void HandleMass()
