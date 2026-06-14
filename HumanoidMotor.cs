@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 [Serializable, RequireComponent(typeof(Humanoid)), RequireComponent(typeof(Rigidbody)), RequireComponent(typeof(Collider))]
@@ -98,9 +99,15 @@ public class HumanoidMotor : MonoBehaviour
 
     [Header("Obstacle")]
     [SerializeField] private bool enableStepUp = true;
+    [SerializeField] private LayerMask bodyLayer;
     [SerializeField] private float stepHeight = 0.4f;
     [SerializeField] private float stepCheckDistance = 0.45f;
     [SerializeField] private float stepSmoothness = 12.0f;
+    [SerializeField] private float lowerGroundHeight = 0.075f;
+    [SerializeField] private float stepCheckRadiusMultiplier = 0.3f;
+    [SerializeField] private float stepForwardOffset = 0.05f;
+    [SerializeField] private float stepTopExtraHeight = 0.1f;
+    [SerializeField] private float minStepHeight = 0.03f;
 
     #endregion
 
@@ -171,6 +178,7 @@ public class HumanoidMotor : MonoBehaviour
     private bool canCrouch;
     private bool canProne;
     private bool canDash;
+    private bool canStepUp;
 
     #endregion
 
@@ -206,6 +214,13 @@ public class HumanoidMotor : MonoBehaviour
 
     public event Action<float> Idle;
  
+    #endregion
+
+    #region Tables
+
+    private readonly Collider[] _overlappedColliders = new Collider[16];
+    private readonly RaycastHit[] _dash_hits = new RaycastHit[16];
+
     #endregion
 
     #region ReadReferences
@@ -610,6 +625,22 @@ public class HumanoidMotor : MonoBehaviour
         return 1.0f - Mathf.Exp(-speed * multiplier * Time.fixedDeltaTime);
     }
 
+    private bool IsSelfHitCollider(Collider __this_collider)
+    {
+        if (__this_collider == bodyCollider || __this_collider.attachedRigidbody == rigidBody || __this_collider.transform.IsChildOf(rootPart))
+            return false;
+
+        return true;
+    }
+
+    private bool IsSelfHitRay(RaycastHit __this_hit)
+    {
+        if (__this_hit.collider == null || __this_hit.collider == bodyCollider || __this_hit.rigidbody == rigidBody || __this_hit.transform.IsChildOf(transform)) 
+            return false;
+
+        return true;
+    }
+
     private bool CanUsePoseInput()
     {
         return motorEnabled &&
@@ -654,30 +685,97 @@ public class HumanoidMotor : MonoBehaviour
 
     private float TestObstacleForDash(Vector3 direction, float targetDistance)
     {
-        RaycastHit[] newHits = rigidBody.SweepTestAll(
-            direction,
-            targetDistance + dashCheckSkin,
-            QueryTriggerInteraction.Ignore
-        );
+        if (bodyCollider == null) return targetDistance;
 
         float mostNearestDistance = targetDistance;
-
-        for (int i = 0; i < newHits.Length; i++)
+        if (bodyCollider is CapsuleCollider capsule)
         {
-            RaycastHit _hitted = newHits[i];
+            Vector3 __world_center = rootPart.TransformPoint(capsule.center);
+            float __half = capsule.height / 2.0f - capsule.radius;
 
-            if (_hitted.collider == null || _hitted.collider == bodyCollider)
-                continue;
+            Vector3 __pA__ = __world_center + Vector3.up * __half;
+            Vector3 __pB__ = __world_center - Vector3.down * __half;
 
-            bool isAnObstacle = (dashCastMask.value & (1 << _hitted.collider.gameObject.layer)) != 0;
+            int __counts = Physics.CapsuleCastNonAlloc(
+                __pA__,
+                __pB__,
+                capsule.radius,
+                direction,
+                _dash_hits,
+                targetDistance,
+                dashCastMask,
+                QueryTriggerInteraction.Ignore
+            );
 
-            if (!isAnObstacle)
-                continue;
+            for (int __i = 0; __i < __counts; __i++)
+            {
+                RaycastHit __this_hit = _dash_hits[__i];
 
-            float safeDistance = Mathf.Max(0f, _hitted.distance - dashCheckSkin);
+                if (IsSelfHitRay(__this_hit))
+                    continue;
 
-            if (safeDistance < mostNearestDistance)
-                mostNearestDistance = safeDistance;
+                float __perfect_distance = Mathf.Max(0f, __this_hit.distance - dashCheckSkin);
+                if (mostNearestDistance > __perfect_distance)
+                    mostNearestDistance = __perfect_distance;
+            }
+        }
+        else if (bodyCollider is BoxCollider box)
+        {
+            Vector3 __world_center = rootPart.TransformPoint(box.center);
+            Vector3 __half_size = box.size / 2.0f;
+
+            int __counts = Physics.BoxCastNonAlloc(__world_center, 
+                __half_size, 
+                direction, 
+                _dash_hits, 
+                rigidBody.rotation, 
+                targetDistance,
+                dashCastMask,
+                QueryTriggerInteraction.Ignore
+            );
+
+            for (int __i = 0; __i < __counts; __i++)
+            {
+                RaycastHit __this_hit = _dash_hits[__i];
+
+                if (IsSelfHitRay(__this_hit))
+                    continue;
+
+                float __perfect_distance = Mathf.Max(0f, __this_hit.distance - dashCheckSkin);
+                if (mostNearestDistance > __perfect_distance)
+                    mostNearestDistance = __perfect_distance;
+            }
+        }
+        else if (bodyCollider is SphereCollider sphere)
+        {
+            Vector3 __world_center = rootPart.TransformPoint(sphere.center);
+            float __half_radius = sphere.radius / 2.0f;
+
+            int __counts = Physics.SphereCastNonAlloc(
+                __world_center,
+                __half_radius,
+                direction,
+                _dash_hits,
+                targetDistance,
+                dashCastMask,
+                QueryTriggerInteraction.Ignore
+            );
+
+            for (int __i = 0; __i < __counts; __i++)
+            {
+                RaycastHit __this_hit = _dash_hits[__i];
+
+                if (IsSelfHitRay(__this_hit))
+                    continue;
+
+                float __perfect_distance = Mathf.Max(0f, __this_hit.distance - dashCheckSkin);
+                if (mostNearestDistance > __perfect_distance)
+                    mostNearestDistance = __perfect_distance;
+            }
+        }
+        else
+        {
+            return targetDistance;
         }
 
         return mostNearestDistance;
@@ -706,7 +804,85 @@ public class HumanoidMotor : MonoBehaviour
         isCeilingAbove = false;
     }
 
-    
+    private void ApplySteppingUp(float deltaSteppy)
+    {
+        Vector3 __velocity = rigidBody.linearVelocity;
+
+        if (__velocity.y > 0.1f)
+            return;
+        
+        Vector3 __target_vel = __velocity + Vector3.up * deltaSteppy;
+
+        Vector3 __new_velocity = Vector3.Lerp(
+            __velocity,
+            __target_vel,
+            stepSmoothness * Time.fixedDeltaTime
+        );
+
+        rigidBody.MovePosition(__new_velocity);
+    }
+
+    private bool CheckColliderOverlap(float __steppy_amount)
+    {
+        if (bodyCollider == null) return false;
+
+        if (bodyCollider is CapsuleCollider capsule)
+        {
+            Vector3 __world_center = rootPart.TransformPoint(capsule.center) + Vector3.up * __steppy_amount;
+            float __half_height = capsule.height / 2.0f - capsule.radius;
+
+            Vector3 __pA__ = __world_center + Vector3.up * __half_height;
+            Vector3 __pB__ = __world_center - Vector3.up * __half_height;
+
+            int __counts = Physics.OverlapCapsuleNonAlloc(__pA__, __pB__, capsule.radius, _overlappedColliders, bodyLayer);
+
+            for (int __i = 0; __i < __counts; __i++)
+            {
+                Collider __this_collider = _overlappedColliders[__i];
+
+                if (IsSelfHitCollider(__this_collider) || __this_collider.isTrigger)
+                    continue;
+
+                return true;
+            }
+        }
+        else if (bodyCollider is BoxCollider box)
+        {
+            Vector3 __world_center = rootPart.TransformPoint(box.center) + Vector3.up * __steppy_amount;
+            Vector3 __half_size = box.size / 2.0f;
+
+            int __counts = Physics.OverlapBoxNonAlloc(__world_center, __half_size, _overlappedColliders, rigidBody.rotation, bodyLayer);
+
+            for (int __i = 0; __i < __counts; __i++)
+            {
+                Collider __this_collider = _overlappedColliders[__i];
+
+                if (IsSelfHitCollider(__this_collider) || __this_collider.isTrigger)
+                    continue;
+
+                return true;
+            }
+        }
+        else if (bodyCollider is SphereCollider sphere)
+        {
+            Vector3 __world_center = rootPart.TransformPoint(sphere.center) + Vector3.up * __steppy_amount;
+            float __half_radius = sphere.radius / 2.0f;
+
+            int __counts = Physics.OverlapSphereNonAlloc(__world_center, __half_radius, _overlappedColliders, bodyLayer);
+
+            for (int __i = 0; __i < __counts; __i++)
+            {
+                Collider __this_collider = _overlappedColliders[__i];
+
+                if (IsSelfHitCollider(__this_collider) || __this_collider.isTrigger)
+                    continue;
+
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private Vector3 GetGroundBottomOnWorld(Collider collider)
     {
@@ -745,13 +921,13 @@ public class HumanoidMotor : MonoBehaviour
             case CapsuleCollider capsule:
             {
                 Vector3 center = rootPart.TransformPoint(capsule.center);
-                return center + rootPart.up * capsule.radius;
+                return center + rootPart.up * (capsule.height / 2.0f);
             }
 
             case BoxCollider box:
             {
                 Vector3 center = rootPart.TransformPoint(box.center);
-                return center + rootPart.up * (box.size.y /2.0f);
+                return center + rootPart.up * (box.size.y / 2.0f);
             }
 
             case SphereCollider sphere:
@@ -1315,6 +1491,98 @@ public class HumanoidMotor : MonoBehaviour
             CeilingAboveHeadEnter?.Invoke();
     }
 
+    private void HandleStepUp()
+    {
+        if (!canStepUp)
+            return;
+
+        Vector3 __direction = _targetMoveDirection;
+        __direction.y = 0f;
+
+        if (__direction.sqrMagnitude < 0.001f)
+            return;
+
+        __direction.Normalize();
+        
+        float __effective_step_height = stepHeight;
+        if (humanoid.IsCrouching)
+            __effective_step_height = __effective_step_height * 0.5f;
+
+        Vector3 __bottom = GetGroundBottomOnWorld(bodyCollider);
+        Vector3 __top = GetHeadTopOnWorld(bodyCollider);
+
+        Vector3 __lower_origin = __bottom + Vector3.up * lowerGroundHeight;
+        Vector3 __upper_origin = __top + Vector3.up * __effective_step_height;
+
+        float __perfect_check_radius = checkRadius * stepCheckRadiusMultiplier;
+
+        RaycastHit __rhHit_lower;
+        bool __bLowerHit = Physics.SphereCast(
+            __lower_origin,
+            __perfect_check_radius,
+            __direction,
+            out __rhHit_lower,
+            stepCheckDistance,
+            feetLayer,
+            QueryTriggerInteraction.Ignore
+        );
+        if (!__bLowerHit) return;
+
+        if (__rhHit_lower.collider == bodyCollider || __rhHit_lower.collider.isTrigger || __rhHit_lower.rigidbody == rigidBody)
+            return;
+
+        bool __bUpperHit = Physics.SphereCast(
+            __upper_origin,
+            __perfect_check_radius,
+            __direction,
+            out _,
+            stepCheckDistance,
+            feetLayer,
+            QueryTriggerInteraction.Ignore
+        );
+        if (__bUpperHit) return;
+
+        Vector3 __step_top_origin = __rhHit_lower.point;
+        __step_top_origin += (__direction * stepForwardOffset) + (Vector3.up * (__effective_step_height + stepTopExtraHeight));
+
+        RaycastHit __rhHit_upper;
+        bool __bTopHit = Physics.Raycast(
+            __step_top_origin,
+            Vector3.down,
+            out __rhHit_upper,
+            __effective_step_height + stepTopExtraHeight,
+            feetLayer,
+            QueryTriggerInteraction.Ignore
+        );
+        if (!__bTopHit) return;
+
+        float __steppy_amount = __rhHit_upper.point.y - __rhHit_lower.point.y;
+
+        float __steppy_angle = Vector3.Angle(__rhHit_upper.normal, Vector3.up);
+        if (__steppy_amount <= 0 || __steppy_amount > stepHeight || __steppy_angle > maxSlopeAngle || isCeilingAbove)
+            return;
+
+        Vector3 __head_center_top = GetHeadTopOnWorld(bodyCollider);
+        Vector3 __predicted_head_top = __head_center_top + Vector3.up * __steppy_amount;
+
+        Vector3 __predicition_check_origin = __predicted_head_top - Vector3.down * (headRadius + headSkin);
+
+        bool __bHeadBlocked = Physics.SphereCast(
+            __predicition_check_origin,
+            headRadius,
+            Vector3.up,
+            out _,
+            headRadius + headSkin,
+            headLayer,
+            QueryTriggerInteraction.Ignore
+        );
+
+        if (__bHeadBlocked || CheckColliderOverlap(__steppy_amount))
+            return;
+        
+        ApplySteppingUp(__steppy_amount);
+    }   
+
     private void HandleMovement()
     {
         if (_isDashing && dashStopMovement)
@@ -1352,8 +1620,8 @@ public class HumanoidMotor : MonoBehaviour
 
         if (!isGrounded && momentumOnAir && !onInput)
         {
-            targetHorizontalVelocity = Vector3.zero;
-            accel = Mathf.Max(airDeceleration, deceleration * 0.35f);
+            targetHorizontalVelocity = horizontalVelocity;
+            accel = 0f;
         }
 
         Vector3 newHorizontalVelocity = Vector3.MoveTowards(
@@ -1376,6 +1644,7 @@ public class HumanoidMotor : MonoBehaviour
             humanoid.StateType != HumanoidStateType.Airborne && 
             humanoid.StateType != HumanoidStateType.FreeFalling && 
             humanoid.StateType != HumanoidStateType.Crouch &&
+            humanoid.StateType != HumanoidStateType.Sliding &&
             humanoid.StateType != HumanoidStateType.Prone &&
             humanoid.StateType != HumanoidStateType.Lunging &&
             isGrounded)
@@ -1383,7 +1652,7 @@ public class HumanoidMotor : MonoBehaviour
 
         if (_runReady)
         {
-            _staminaUsedTimer += Time.deltaTime;
+            _staminaUsedTimer += Time.fixedDeltaTime;
 
             if (_staminaUsedTimer >= humanoid.StaminaDecrementTick)
             {
@@ -1564,10 +1833,9 @@ public class HumanoidMotor : MonoBehaviour
         canJump = humanoid.CanJump &&
             humanoid.IsAlive &&
             !humanoid.PlatformStanding &&
-            humanoid.StateType != HumanoidStateType.Airborne &&
-            humanoid.StateType != HumanoidStateType.FreeFalling &&
             humanoid.StateType != HumanoidStateType.Crouch &&
             humanoid.StateType != HumanoidStateType.Prone &&
+            humanoid.StateType != HumanoidStateType.Lunging &&
             isGrounded &&
             _jumpLockCount <= 0;
 
@@ -1580,6 +1848,19 @@ public class HumanoidMotor : MonoBehaviour
             !humanoid.PlatformStanding &&
             humanoid.StateType != HumanoidStateType.Crouch &&
             humanoid.StateType != HumanoidStateType.Prone;
+
+        canStepUp = motorEnabled &&
+            enableStepUp &&
+            humanoid.IsAlive &&
+            isGrounded &&
+            !isSliding &&
+            !_isDashing &&
+            humanoid.StateType != HumanoidStateType.Jumping &&
+            humanoid.StateType != HumanoidStateType.Sliding &&
+            humanoid.StateType != HumanoidStateType.Prone &&
+            humanoid.StateType != HumanoidStateType.Airborne &&
+            humanoid.StateType != HumanoidStateType.FreeFalling &&
+            _targetMoveDirection.sqrMagnitude > 0.001f;
     }
 
     #endregion
@@ -1623,15 +1904,16 @@ public class HumanoidMotor : MonoBehaviour
         CheckGround();
         CheckHead();
 
+        HandleFallTracking();
+        HandleSlopeSliding();
+
         UpdatePermissionRuntime();
 
         HandleJump();
         HandleMovement();
+        HandleStepUp();
         HandleMass();
         HandleDashing();
-
-        HandleFallTracking();
-        HandleSlopeSliding();
         HandleRotation();
         HandleColliderExtension();
 
