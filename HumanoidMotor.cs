@@ -810,10 +810,10 @@ public class HumanoidMotor : MonoBehaviour
         if (__velocity.y > 0.1f)
             return;
         
-        Vector3 __target_vel = __velocity + Vector3.up * deltaSteppy;
+        Vector3 __target_vel = rigidBody.position + Vector3.up * deltaSteppy;
 
         Vector3 __new_velocity = Vector3.Lerp(
-            __velocity,
+            rigidBody.position,
             __target_vel,
             stepSmoothness * Time.fixedDeltaTime
         );
