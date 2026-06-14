@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using UnityEngine;
 
 [Serializable, RequireComponent(typeof(Humanoid)), RequireComponent(typeof(Rigidbody)), RequireComponent(typeof(Collider))]
@@ -1926,6 +1925,69 @@ public class HumanoidMotor : MonoBehaviour
         rigidBody = GetComponent<Rigidbody>();
         bodyCollider = GetComponent<Collider>();
         rootPart = transform;
+    }
+
+    private void OnValidate()
+    {
+        acceleration = Mathf.Max(0f, acceleration);
+        deceleration = Mathf.Max(0f, deceleration);
+        airAcceleration = Mathf.Max(0f, airAcceleration);
+        airDeceleration = Mathf.Max(0f, airDeceleration);
+
+        bodyHeight = Mathf.Max(0.1f, bodyHeight);
+        crouchHeight = Mathf.Clamp(crouchHeight, 0.1f, bodyHeight);
+        proneHeight = Mathf.Clamp(proneHeight, 0.1f, crouchHeight);
+
+        jumpHeight = Mathf.Max(0f, jumpHeight);
+        jumpCooldown = Mathf.Max(0f, jumpCooldown);
+        coyoteTime = Mathf.Max(0f, coyoteTime);
+        jumpBufferTime = Mathf.Max(0f, jumpBufferTime);
+        jumpCutMultiplier = Mathf.Clamp01(jumpCutMultiplier);
+
+        dashSpeed = Mathf.Max(0f, dashSpeed);
+        dashCooldown = Mathf.Max(0f, dashCooldown);
+        dashDuration = Mathf.Max(0f, dashDuration);
+        dashMinDistance = Mathf.Max(0f, dashMinDistance);
+
+        checkRadius = Mathf.Max(0.01f, checkRadius);
+        checkDistance = Mathf.Max(0.01f, checkDistance);
+        headRadius = Mathf.Max(0.01f, headRadius);
+        headMaxDistance = Mathf.Max(0.01f, headMaxDistance);
+
+
+    }
+
+    private void OnDestroy()
+    {
+        Grounded = null;
+        Landed = null;
+        Sliding = null;
+
+        OnCrouchBegin = null;
+        OnProneBegin = null;
+        OnAirborneBegin = null;
+        OnFreeFallingBegin = null;
+        OnDashBegin = null;
+        CeilingAboveHeadEnter = null;
+
+        OnAirborne = null;
+        OnFreeFalling = null;
+        OnJumping = null;
+        OnDashing = null;
+        Proning = null;
+        Crouching = null;
+        CeilingAboveHead = null;
+
+        OnDashEnded = null;
+        UnCrouched = null;
+        UnProned = null;
+        CeilingAboveHeadExit = null;
+
+        OnWalking = null;
+        OnRunning = null;
+        OnRotating = null;
+
+        Idle = null;
     }
 
     #endregion
