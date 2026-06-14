@@ -693,7 +693,7 @@ public class HumanoidMotor : MonoBehaviour
             float __half = capsule.height / 2.0f - capsule.radius;
 
             Vector3 __pA__ = __world_center + Vector3.up * __half;
-            Vector3 __pB__ = __world_center - Vector3.down * __half;
+            Vector3 __pB__ = __world_center - Vector3.up * __half;
 
             int __counts = Physics.CapsuleCastNonAlloc(
                 __pA__,
@@ -810,10 +810,10 @@ public class HumanoidMotor : MonoBehaviour
         if (__velocity.y > 0.1f)
             return;
         
-        Vector3 __target_vel = rigidBody.position + Vector3.up * deltaSteppy;
+        Vector3 __target_vel = __velocity + Vector3.up * deltaSteppy;
 
         Vector3 __new_velocity = Vector3.Lerp(
-            rigidBody.position,
+            __velocity,
             __target_vel,
             stepSmoothness * Time.fixedDeltaTime
         );
