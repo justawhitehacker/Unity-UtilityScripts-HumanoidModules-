@@ -72,6 +72,10 @@ using UnityEngine;
     /// </summary>
     Prone,
     /// <summary>
+    /// Humanoid is dashing, happened when Humanoid is using Dash() from Motor
+    /// </summary>
+    Lunging,
+    /// <summary>
     /// Humanoid is not in written state, there is no conceptual state of the Humanoid
     /// </summary>
     Neutral
@@ -132,6 +136,7 @@ public class Humanoid : MonoBehaviour
     [SerializeField] private bool canJump = true;
     [SerializeField] private bool canCrouch = true;
     [SerializeField] private bool canProne = true;
+    [SerializeField] private bool canDash = true;
     [SerializeField] private bool platformStanding = false;
 
     [Header("Max Attributes")]
@@ -253,7 +258,10 @@ public class Humanoid : MonoBehaviour
     public bool CanJump => canJump;
     public bool CanCrouch => canCrouch;
     public bool CanProne => canProne;
+    public bool CanDash => canDash;
     public bool IsJumping => isJumping;
+    public bool IsCrouching => isCrouching;
+    public bool IsProning => isProning;
     public bool CanApplyFallDamage => canApplyFallDamage;
     public bool HealthRegenerationEnabled => healthRegenerationEnabled;
     public bool StaminaRegenerationEnabled => staminaRegenerationEnabled;
@@ -1095,6 +1103,23 @@ public class Humanoid : MonoBehaviour
         return Vector3.Dot(transform.right, moveDirection);
     }
 
+    /// <summary>
+    /// Returning Motor component of this Humanoid that attached
+    /// </summary>
+    /// <returns>HumanoidMotor</returns>
+    public HumanoidMotor GetMotor()
+    {
+        HumanoidMotor motor = GetComponent<HumanoidMotor>();
+
+        if (motor == null)
+        {
+            Debug.LogError("Cannot find Motor of this Humanoid");
+            return null;
+        }
+
+        return motor;
+    }
+
     /* extra methods */
 
     /// <summary>
@@ -1283,6 +1308,59 @@ public class Humanoid : MonoBehaviour
         rigidBody = GetComponent<Rigidbody>();
         bodyCollider = GetComponent<Collider>();
         rootPart = transform;
+    }
+
+    private void OnDestroy()
+    {
+        Died = null;
+        Revived = null;
+
+        OnHealthRegenerationEnabledChanged = null;
+        OnStaminaRegenerationEnabledChanged = null;
+
+        Damaged = null;
+        Healed = null;
+
+        OnStatusAdded = null;
+        OnStatusRemoved = null;
+        OnStatusChanged = null;
+        OnTemporaryStatusAddedOrChanged = null;
+        OnTemporaryStatusExpired = null;
+        OnTemporaryStatusRemoved = null;
+
+        OnHealthChanged = null;
+        OnStaminaChanged = null;
+        OnWalkSpeedChanged = null;
+        OnRunningSpeedChanged = null;
+        OnJumpPowerChanged = null;
+        OnMaxHealthChanged = null;
+        OnMaxStaminaChanged = null;
+        OnMaxWalkSpeedChanged = null;
+        OnMaxRunningSpeedChanged = null;
+        OnMaxJumpPowerChanged = null;
+        OnStaminaDecrementAmountChanged = null;
+        OnStaminaDecrementTickChanged = null;
+        OnHealthRegenerationAmountChanged = null;
+        OnHealthRegenerationTickChanged = null;
+        OnHealthRegenerationDelayChanged = null;
+        OnStaminaRegenerationAmountChanged = null;
+        OnStaminaRegenerationTickChanged = null;
+        OnStaminaRegenerationDelayChanged = null;
+        OnFallDamageMultiplierChanged = null;
+        OnSafeFromFallDistanceChanged = null;
+        OnWalkToStoppingDistanceChanged = null;
+
+        OnCameraOffsetChanged = null;
+        OnLinearVelocityChanged = null;
+        OnAngularVelocityChanged = null;
+
+        OnStateChanged = null;
+        OnOwnerChanged = null;
+
+        OnCanApplyFallDamageChanged = null;
+        OnPlatformStandingChanged = null;
+        OnCanMoveChanged = null;
+        OnCanJumpChanged = null;
     }
     #endregion
 
