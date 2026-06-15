@@ -1,6 +1,27 @@
+/***************************************************************************************************************************
+ * HumanoidMotor, module for Humanoid movement system of character with utilize physics, Unity. Works for Unity >6.        *
+ * Created by Raihan, May 28 - 3 June - 15 June, 2026. v1.0.0                                                              *
+ * Free usage, MIT License in GitHub repository.                                                                           *
+ *                                                                                                                         *
+ * Structures:                                                                                                             *
+ * Humanoid                                                                                                                *
+ *     \_ HumanoidMotor                                                                                                    *
+ *     \_ HumanoidAnimator                                                                                                 *
+ *     \_ HumanoidCombat                                                                                                   *
+ *     \_ HumanoidInputController                                                                                          *
+ *     \_ AIHumanoidHandler                                                                                                *
+ *                                                                                                                         *
+ * If you have some problems of my modules or giving recommendation, chat:                                                 *
+ * @raihanaufal_77 in Instagram.                                                                                           * 
+ *                                                                                                                         *
+ * But, I'm not too active in media socials. Therefore, you need some times for waiting my responses.                      *
+ ***************************************************************************************************************************/
 using System;
 using UnityEngine;
 
+/// <summary>
+/// HumanoidMotor's module script, as the locomotive structure of this Humanoid or transform based with physics
+/// </summary>
 [Serializable, RequireComponent(typeof(Humanoid)), RequireComponent(typeof(Rigidbody)), RequireComponent(typeof(Collider))]
 public class HumanoidMotor : MonoBehaviour
 {
@@ -54,6 +75,7 @@ public class HumanoidMotor : MonoBehaviour
     [SerializeField] private float coyoteTime = 0.2f;
     [SerializeField] private float jumpBufferTime = 0.15f;
     [SerializeField] private float jumpCutMultiplier = 0.5f;
+    [SerializeField] private bool jumpAffectsFall = true;
 
     [Header("Crouch")]
     [SerializeField] private float crouchHeight = 1.0f;
@@ -112,6 +134,9 @@ public class HumanoidMotor : MonoBehaviour
 
     #region UnserializedReferences
 
+    /// <summary>
+    /// Stance Intent include Prone - Crouch - and Standing, LLM
+    /// </summary>
     private enum StanceIntent
     {
         Prone,
@@ -125,6 +150,8 @@ public class HumanoidMotor : MonoBehaviour
     private Vector3 moveDirection;
     private Vector3 lastMoveDirection;
     private Vector3 _dashDirection;
+
+    private Vector3 _thisGravity;
 
     private Vector3 _standingCenter;
 
@@ -224,13 +251,28 @@ public class HumanoidMotor : MonoBehaviour
 
     #region ReadReferences
 
+    /// <summary>
+    /// Returning the Humanoid that HumanoidMotor used
+    /// </summary>
     public Humanoid Core => humanoid;
 
+    /// <summary>
+    /// Returning the normalized vector towards ground
+    /// </summary>
     public Vector3 GroundNormal => groundNormal;
+    /// <summary>
+    /// Returning the vector of move direction of this Humanoid
+    /// </summary>
     public Vector3 MoveDirection => moveDirection;
+    /// <summary>
+    /// Returning the vector of lasted move direction of this Humanoid
+    /// </summary>
     public Vector3 LastMoveDirection => lastMoveDirection;
+    /// <summary>
+    /// Returning the wind velocity of the Motor
+    /// </summary>
     public Vector3 WindVelocity => windVelocity;
-
+    
     public Rigidbody RigidBody => rigidBody;
     public Transform RootPart => rootPart;
     public Collider BodyCollider => bodyCollider;
@@ -308,15 +350,19 @@ public class HumanoidMotor : MonoBehaviour
         Vector3 dir = Direction;
         dir.y = 0f;
 
-        bool canRun = Running &&
-            humanoid.StateType != HumanoidStateType.Crouch &&
-            humanoid.StateType != HumanoidStateType.Prone &&
-            humanoid.Stamina > humanoid.StaminaDecrementAmount;
+        bool hasInput = dir.sqrMagnitude > 0.05f;
 
-        if (dir.sqrMagnitude > 0.05f)
+        if (hasInput)
             dir.Normalize();
         else
             dir = Vector3.zero;
+
+       bool canRun = hasInput && 
+            Running &&
+            humanoid.StateType != HumanoidStateType.Crouch &&
+            humanoid.StateType != HumanoidStateType.Prone &&
+            humanoid.StateType != HumanoidStateType.Sliding &&
+            humanoid.Stamina > humanoid.StaminaDecrementAmount;
 
         _moveInput = dir;
         _runReady = canRun;
@@ -627,17 +673,18 @@ public class HumanoidMotor : MonoBehaviour
     private bool IsSelfHitCollider(Collider __this_collider)
     {
         if (__this_collider == bodyCollider || __this_collider.attachedRigidbody == rigidBody || __this_collider.transform.IsChildOf(rootPart))
-            return false;
+            return true;
 
-        return true;
+        return false;
     }
 
     private bool IsSelfHitRay(RaycastHit __this_hit)
     {
-        if (__this_hit.collider == null || __this_hit.collider == bodyCollider || __this_hit.rigidbody == rigidBody || __this_hit.transform.IsChildOf(transform)) 
-            return false;
+        Collider __this_colider = __this_hit.collider;
+        if (__this_colider == null || __this_colider == bodyCollider || __this_hit.rigidbody == rigidBody || __this_hit.transform.IsChildOf(transform)) 
+            return true;
 
-        return true;
+        return false;
     }
 
     private bool CanUsePoseInput()
@@ -805,17 +852,19 @@ public class HumanoidMotor : MonoBehaviour
 
     private void ApplySteppingUp(float deltaSteppy)
     {
-        Vector3 __velocity = rigidBody.linearVelocity;
+        Vector3 __velocity = rigidBody.position;
 
         if (__velocity.y > 0.1f)
             return;
         
         Vector3 __target_vel = __velocity + Vector3.up * deltaSteppy;
 
+        float __t = 1.0f - Mathf.Exp(-stepSmoothness * Time.fixedDeltaTime);
+
         Vector3 __new_velocity = Vector3.Lerp(
             __velocity,
             __target_vel,
-            stepSmoothness * Time.fixedDeltaTime
+            __t
         );
 
         rigidBody.MovePosition(__new_velocity);
@@ -977,7 +1026,7 @@ public class HumanoidMotor : MonoBehaviour
                     capsule.height = targetHeight;
                     capsule.center = targetCenter;        
                 }
-                return true;
+                return fuzzyEq;
             }
             
             case BoxCollider box:
@@ -1015,7 +1064,7 @@ public class HumanoidMotor : MonoBehaviour
                 }
 
                 
-                return true;
+                return fuzzyEq;
             }
 
             case SphereCollider sphere:
@@ -1052,7 +1101,7 @@ public class HumanoidMotor : MonoBehaviour
                     sphere.center = targetCenter;        
                 }
 
-                return true;
+                return fuzzyEq;
             }
 
             default:
@@ -1088,7 +1137,7 @@ public class HumanoidMotor : MonoBehaviour
 
                     _standCenterObtained = false;        
                 }
-                return true;
+                return fuzzyEq;
             }
             
             case BoxCollider box:
@@ -1119,17 +1168,18 @@ public class HumanoidMotor : MonoBehaviour
                     _standCenterObtained = false;        
                 }
 
-                return true;
+                return fuzzyEq;
             }
 
             case SphereCollider sphere:
             {
                 float targetHeight = standingHeight;
+                float targetRadius = targetHeight / 2.0f;
                 Vector3 targetCenter = _standingCenter;
 
                 float t = GetT(unTransitionSpeed, autoScaleMultiplier);
 
-                float lerpHeight = Mathf.Lerp(sphere.radius, targetHeight, t);
+                float lerpHeight = Mathf.Lerp(sphere.radius, targetRadius, t);
                 Vector3 lerpCenter = Vector3.Lerp(sphere.center, targetCenter, t);
 
                 sphere.radius = lerpHeight;
@@ -1141,13 +1191,13 @@ public class HumanoidMotor : MonoBehaviour
                 
                 if (fuzzyEq)
                 {
-                    sphere.radius = targetHeight;
+                    sphere.radius = targetRadius;
                     sphere.center = targetCenter;
 
                     _standCenterObtained = false;        
                 }
 
-                return true;
+                return fuzzyEq;
             }
 
             default:
@@ -1208,11 +1258,21 @@ public class HumanoidMotor : MonoBehaviour
         if (!humanoid.CanApplyFallDamage || !humanoid.IsAlive)
             return;
         
-        if (humanoid.SafeFromFallDistance >= fallDistance)
+        if (humanoid.SafeFromFallDistance >= fallStartY)
             return;
 
-        float totalDamage = (fallDistance - humanoid.SafeFromFallDistance) * humanoid.FallDamageMultiplier;
-        humanoid.TakeDamage(totalDamage);
+        float __h = Mathf.Max(0f, fallStartY - humanoid.SafeFromFallDistance);
+        if (__h <= 0) return;
+
+        if (_thisGravity.y <= 0.01f)
+            _thisGravity.y = 9.81f;
+
+        float __m = Mathf.Max(0.01f, rigidBody.mass);
+        float __energy = __m * _thisGravity.y * __h;
+        __energy = Mathf.Abs(__energy);
+
+        float __total_damage = __energy * humanoid.FallDamageMultiplier;
+        humanoid.TakeDamage(__total_damage);
     }
 
     private void HandleColliderExtension()
@@ -1303,34 +1363,38 @@ public class HumanoidMotor : MonoBehaviour
 
     private void HandleFallTracking()
     {
-        if (!isGrounded && rigidBody.linearVelocity.y > floatingVelocity)
+        if (!isGrounded)
         {
-            if (humanoid.StateType != HumanoidStateType.Airborne)
+            if (rigidBody.linearVelocity.y > floatingVelocity)
             {
-                fallStartY = rootPart.position.y;
-                humanoid.ChangeState(HumanoidStateType.Airborne);
+                if (humanoid.StateType != HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling)
+                {
+                    if (!jumpAffectsFall && humanoid.StateType == HumanoidStateType.Jumping) return;
 
-                isGrounded = false;
-                OnAirborneBegin?.Invoke();
+                    fallStartY = rootPart.position.y;
+                    humanoid.ChangeState(HumanoidStateType.Airborne);
+
+                    isGrounded = false;
+                    OnAirborneBegin?.Invoke();
+                }
+
+                fallStartY = Mathf.Max(fallStartY, rootPart.position.y);
+                OnAirborne?.Invoke();
             }
 
-            fallDistance = rootPart.position.y - fallStartY;
-            OnAirborne?.Invoke();
-        }
-
-        if (!isGrounded && rigidBody.linearVelocity.y < -floatingVelocity)
-        {
-            if (humanoid.StateType == HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling)
+            if (rigidBody.linearVelocity.y < -floatingVelocity)
             {
-                humanoid.ChangeState(HumanoidStateType.FreeFalling);
+                if (humanoid.StateType != HumanoidStateType.FreeFalling)
+                {
+                    humanoid.ChangeState(HumanoidStateType.FreeFalling);
+                    OnFreeFallingBegin?.Invoke();
+                }
 
-                OnFreeFallingBegin?.Invoke();
+                fallDistance = Mathf.Max(0f, fallStartY - rootPart.position.y);
+                OnFreeFalling?.Invoke();
             }
-
-            OnFreeFalling?.Invoke();
         }
-
-        if (isGrounded)
+        else
         {
             if (humanoid.StateType == HumanoidStateType.FreeFalling)
             {
@@ -1343,23 +1407,22 @@ public class HumanoidMotor : MonoBehaviour
             }
             else
             {
-                if (humanoid.StateType != HumanoidStateType.Airborne)
+                if (humanoid.StateType != HumanoidStateType.Airborne &&
+                    humanoid.StateType != HumanoidStateType.Crouch && 
+                    humanoid.StateType != HumanoidStateType.Prone && 
+                    humanoid.StateType != HumanoidStateType.Lunging)
                 {
-                    if (humanoid.StateType != HumanoidStateType.Crouch && humanoid.StateType != HumanoidStateType.Prone && humanoid.StateType != HumanoidStateType.Lunging)
+                    if (_targetMoveDirection.sqrMagnitude <= 0.001f)
                     {
-                        if (_targetMoveDirection.sqrMagnitude <= 0.001f)
+                        humanoid.ChangeState(HumanoidStateType.Idle);
+                        humanoid.SetHumanoidIsMoving(false);
+
+                        if (Time.time - _idleStayingTimer >= 1)
                         {
-                            humanoid.ChangeState(HumanoidStateType.Idle);
-                            humanoid.SetHumanoidIsMoving(false);
-
-                            if (Time.time - _idleStayingTimer >= 1)
-                            {
-                                _idleStayingCounter += 1;
-                                _idleStayingTimer = Time.time;
-                            }
-
-                            Idle?.Invoke(_idleStayingCounter);
+                            _idleStayingCounter += 1;
+                            _idleStayingTimer = Time.time;
                         }
+                        Idle?.Invoke(_idleStayingCounter);
                     }
                 }
             }
@@ -1564,7 +1627,7 @@ public class HumanoidMotor : MonoBehaviour
         Vector3 __head_center_top = GetHeadTopOnWorld(bodyCollider);
         Vector3 __predicted_head_top = __head_center_top + Vector3.up * __steppy_amount;
 
-        Vector3 __predicition_check_origin = __predicted_head_top - Vector3.down * (headRadius + headSkin);
+        Vector3 __predicition_check_origin = __predicted_head_top - Vector3.up * (headRadius + headSkin);
 
         bool __bHeadBlocked = Physics.SphereCast(
             __predicition_check_origin,
@@ -1637,46 +1700,47 @@ public class HumanoidMotor : MonoBehaviour
 
         moveDirection = onInput ? _targetMoveDirection.normalized : Vector3.zero;
         if (onInput)
+        {
             lastMoveDirection = _targetMoveDirection.normalized;
 
-        if (onInput && 
-            humanoid.StateType != HumanoidStateType.Airborne && 
-            humanoid.StateType != HumanoidStateType.FreeFalling && 
-            humanoid.StateType != HumanoidStateType.Crouch &&
-            humanoid.StateType != HumanoidStateType.Sliding &&
-            humanoid.StateType != HumanoidStateType.Prone &&
-            humanoid.StateType != HumanoidStateType.Lunging &&
-            isGrounded)
-            humanoid.ChangeState(_runReady ? HumanoidStateType.Running : HumanoidStateType.Walking);
+            if (humanoid.StateType != HumanoidStateType.Airborne && 
+                humanoid.StateType != HumanoidStateType.FreeFalling && 
+                humanoid.StateType != HumanoidStateType.Crouch &&
+                humanoid.StateType != HumanoidStateType.Sliding &&
+                humanoid.StateType != HumanoidStateType.Prone &&
+                humanoid.StateType != HumanoidStateType.Lunging &&
+                isGrounded)
+                humanoid.ChangeState(_runReady ? HumanoidStateType.Running : HumanoidStateType.Walking);
 
-        if (_runReady)
-        {
-            _staminaUsedTimer += Time.fixedDeltaTime;
-
-            if (_staminaUsedTimer >= humanoid.StaminaDecrementTick)
+            if (_runReady)
             {
-                bool usingStamina = humanoid.TryUsingStamina(humanoid.StaminaDecrementAmount);
-                _staminaUsedTimer = 0;
+                _staminaUsedTimer += Time.fixedDeltaTime;
 
-                if (!usingStamina)
-                    _runReady = false;
+                if (_staminaUsedTimer >= humanoid.StaminaDecrementTick)
+                {
+                    bool usingStamina = humanoid.TryUsingStamina(humanoid.StaminaDecrementAmount);
+                    _staminaUsedTimer = 0;
+
+                    if (!usingStamina)
+                        _runReady = false;
+                }
+
+                OnRunning?.Invoke(_targetMoveDirection.normalized);
             }
-
-            OnRunning?.Invoke(_targetMoveDirection.normalized);
-        }
-        else
-        {
-            OnWalking?.Invoke(_targetMoveDirection.normalized);
+            else
+            {
+                OnWalking?.Invoke(_targetMoveDirection.normalized);
+            }
         }
     }
 
     private void HandleJump()
     {
-        bool hasTimeBuffer = _jumpRequested && Time.time - _lastJumpRequestTime <= jumpBufferTime;
+        bool jumpBuffered = _jumpRequested && Time.time - _lastJumpRequestTime <= jumpBufferTime;
         bool canCoyote = isGrounded || Time.time - _lastGroundedTime <= coyoteTime;
         bool cooldownReady = Time.time - _lastJumpTime >= jumpCooldown;
 
-        if (!cooldownReady || !canCoyote || !hasTimeBuffer)
+        if (!cooldownReady || !canCoyote || !jumpBuffered)
             return;
 
         float power = Mathf.Abs(Physics.gravity.y * gravityScale);
@@ -1771,6 +1835,8 @@ public class HumanoidMotor : MonoBehaviour
         Vector3 gravity = Physics.gravity * gravityMultiplier;
         velocity += gravity * Time.fixedDeltaTime;
 
+        _thisGravity = gravity;
+
         if (!isGrounded)
         {
             Vector3 windForce = windVelocity * windInfluence;
@@ -1835,12 +1901,11 @@ public class HumanoidMotor : MonoBehaviour
             humanoid.StateType != HumanoidStateType.Crouch &&
             humanoid.StateType != HumanoidStateType.Prone &&
             humanoid.StateType != HumanoidStateType.Lunging &&
-            isGrounded &&
             _jumpLockCount <= 0;
 
-        canCrouch = humanoid.CanCrouch && CanUsePoseInput();
+        canCrouch = humanoid.CanCrouch && humanoid.StateType != HumanoidStateType.Crouch && CanUsePoseInput();
 
-        canProne = humanoid.CanProne && CanUsePoseInput();
+        canProne = humanoid.CanProne && humanoid.StateType != HumanoidStateType.Prone && CanUsePoseInput();
 
         canDash = humanoid.CanDash &&
             humanoid.IsAlive &&
