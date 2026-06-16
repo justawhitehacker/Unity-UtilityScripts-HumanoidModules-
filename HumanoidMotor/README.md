@@ -82,7 +82,7 @@ public class PlayerMotorInput : MonoBehaviour
     private void Start()
     {
         // turn on other locomotions that we needed than only move locomotion
-        motor.EnableLocomotions( MotorLocomotion.Jump | MotorLocomotion.Crouch | MotorLocomotion.Prone | MotorLocomotion.Dash );
+        motor.EnableLocomotions( MotorLocomotion.Everything );
     }
 
     private void Update()
@@ -204,6 +204,18 @@ public class SimpleStanceAgent : MonoBehaviour
 ## api reference
 
 ### locomotions
+
+[ MotorLocomotions ]
+| enumerations | description |
+| --- | --- |
+| `Move` | where humanoid is able to do movement, such as walking or running. |
+| `Jump` | where humanoid is able to do jump locomotion. |
+| `Crouch` | where humanoid is able to do crouch system. |
+| `Prone` | where humanoid is able to do prone system. |
+| `Dash` | where humanoid is able to dash, different from move that moves in smooth, dash is moving humanoid in high-speed. |
+| `SteppingUp` | where humanoid is able to move and stepping up on the small obstacles like stairs, small stone/platform, etc. |
+| `Controller` | the good choice for simple motor system, where humanoid is able to move, jump, and moving through small obstacles.F Following what `CharacterController` of Unity can do. |
+| `Everything` | where humanoid can do any locomotion motives. |
 
 | method | description |
 | --- | --- |
