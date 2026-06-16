@@ -1,3 +1,11 @@
+  ___ ___                                    .__    .___
+ /   |   \ __ __  _____ _____    ____   ____ |__| __| _/
+/    ~    \  |  \/     \\__  \  /    \ /  _ \|  |/ __ | 
+\    Y    /  |  /  Y Y  \/ __ \|   |  (  <_> )  / /_/ | 
+ \___|_  /|____/|__|_|  (____  /___|  /\____/|__\____ | 
+       \/             \/     \/     \/               \/ 
+
+Copyright (c) 2026 by justawhitehacker (aka Raihan Naufal Azmi)
 # humanoid
 
 `Humanoid` is the core character module for a unity humanoid-style character system.
