@@ -389,6 +389,16 @@ public class HumanoidMotor : MonoBehaviour
     }
 
     /// <summary>
+    /// Comparing locomotion if the locomotion was allowed by the HumanoidMotor
+    /// </summary>
+    /// <param name="__locomotion">MotorLocomotions</param>
+    /// <returns>True/False</returns>
+    public bool IsLocomotionAllowed(MotorLocomotion __locomotion)
+    {
+        return (_allowedLocomotions & __locomotion) != 0;
+    }
+
+    /// <summary>
     /// Moving the Humanoid with desired or target direction from the world space, based to Unity's physics from Humanoid
     /// </summary>
     /// <param name="Direction">World-Space Direction, must be Vector3</param>
@@ -714,11 +724,6 @@ public class HumanoidMotor : MonoBehaviour
     #endregion
 
     #region InternalHelpers
-
-    private bool IsLocomotionAllowed(MotorLocomotion __locomotion)
-    {
-        return (_allowedLocomotions & __locomotion) != 0;
-    }
 
     private float GetT(float speed, float multiplier)
     {
@@ -2014,7 +2019,7 @@ public class HumanoidMotor : MonoBehaviour
         isCeilingAbove = false;
         isGrounded = false;
 
-        _allowedLocomotions = MotorLocomotion.Move | MotorLocomotion.Jump | MotorLocomotion.SteppingUp;
+        _allowedLocomotions = MotorLocomotion.Move;
 
         _idleStayingTimer = Time.time;
     }
