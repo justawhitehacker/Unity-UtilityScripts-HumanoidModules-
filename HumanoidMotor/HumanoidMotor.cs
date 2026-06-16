@@ -272,6 +272,12 @@ public class HumanoidMotor : MonoBehaviour
     public event Action<Vector3> OnRotating;
 
     public event Action<float> Idle;
+
+    // setters
+
+    public event Action<float, float> OnBodyHeightChanged;
+    public event Action<float, float> OnAccelerationChanged;
+    public event Action<float, float> OnDecelerationChanged;
  
     #endregion
 
@@ -719,6 +725,34 @@ public class HumanoidMotor : MonoBehaviour
         humanoid.FaceDirection(direction.normalized, false);
 
         OnRotating?.Invoke(direction);
+    }
+    
+    #endregion
+
+    #region methods
+
+    /// <summary>
+    /// Setting Motor's body height, that must be same as collider's height
+    /// </summary>
+    public void SetMotorBodyHeight(float amount)
+    {
+        float old = bodyHeight;
+        bodyHeight = Mathf.Max(0f, amount);
+
+        if (old != bodyHeight)
+            OnBodyHeightChanged?.Invoke(old, bodyHeight);
+    }
+    
+    /// <summary>
+    /// Setting Motor's walking acceleration
+    /// </summary>
+    public void SetMotorAcceleration(float amount)
+    {
+        float old = acceleration;
+        acceleration = Mathf.Max(0f, amount);
+
+        if (old != acceleration)
+            OnAccelerationChanged?.Invoke(old, acceleration);
     }
     
     #endregion
