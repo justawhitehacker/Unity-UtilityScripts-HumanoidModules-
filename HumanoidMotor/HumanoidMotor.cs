@@ -19,6 +19,7 @@
 using System;
 using UnityEngine;
 
+[Flags]
 /// <summary>
 /// Locomotion type of Motor of Humanoid
 /// </summary>
@@ -47,7 +48,15 @@ public enum MotorLocomotion
     /// <summary>
     /// Locomotion type where Humanoid is able to stepping up on the obstacles
     /// </summary>
-    SteppingUp = 32
+    SteppingUp = 32,
+    /// <summary>
+    /// Locomotion type for default and perfect system for simpel character movement, where Humanoid is able to move and jump
+    /// </summary>
+    Controller = Move | Jump | SteppingUp,
+    /// <summary>
+    /// All of locomotion types of Humanoid
+    /// </summary>
+    Everything = Move | Jump | Crouch | Prone | Dash | SteppingUp
 };
 
 /// <summary>
