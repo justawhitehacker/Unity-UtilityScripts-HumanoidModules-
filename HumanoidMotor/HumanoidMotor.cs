@@ -2773,7 +2773,7 @@ public class HumanoidMotor : MonoBehaviour
     /// </summary>
     private bool IsSelfHitCollider(Collider __this_collider)
     {
-        if (__this_collider == bodyCollider || __this_collider.attachedRigidbody == rigidBody || __this_collider.transform.IsChildOf(rootPart))
+        if (__this_collider == bodyCollider || __this_collider.isTrigger || __this_collider.attachedRigidbody == rigidBody || __this_collider.transform.IsChildOf(rootPart))
             return true;
 
         return false;
@@ -2785,7 +2785,7 @@ public class HumanoidMotor : MonoBehaviour
     private bool IsSelfHitRay(RaycastHit __this_hit)
     {
         Collider __this_colider = __this_hit.collider;
-        if (__this_colider == null || __this_colider == bodyCollider || __this_hit.rigidbody == rigidBody || __this_hit.transform.IsChildOf(transform)) 
+        if (__this_colider == null || __this_colider.isTrigger || __this_colider == bodyCollider || __this_hit.rigidbody == rigidBody || __this_hit.transform.IsChildOf(transform)) 
             return true;
 
         return false;
