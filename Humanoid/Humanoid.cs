@@ -132,11 +132,6 @@ public class Humanoid : MonoBehaviour
     [SerializeField] private float walkToStoppingDistance = 0.5f;
 
     [SerializeField] private Vector3 cameraOffset = Vector3.zero;
-    [SerializeField] private bool canMove = true;
-    [SerializeField] private bool canJump = true;
-    [SerializeField] private bool canCrouch = true;
-    [SerializeField] private bool canProne = true;
-    [SerializeField] private bool canDash = true;
     [SerializeField] private bool platformStanding = false;
 
     [Header("Max Attributes")]
@@ -254,11 +249,6 @@ public class Humanoid : MonoBehaviour
     public bool IsAlive => isAlive;
     public bool IsMoving => isMoving;
     public bool PlatformStanding => platformStanding;
-    public bool CanMove => canMove;
-    public bool CanJump => canJump;
-    public bool CanCrouch => canCrouch;
-    public bool CanProne => canProne;
-    public bool CanDash => canDash;
     public bool IsJumping => isJumping;
     public bool IsCrouching => isCrouching;
     public bool IsProning => isProning;
@@ -322,8 +312,6 @@ public class Humanoid : MonoBehaviour
 
     public event Action<bool, bool> OnCanApplyFallDamageChanged;
     public event Action<bool, bool> OnPlatformStandingChanged;
-    public event Action<bool, bool> OnCanMoveChanged;
-    public event Action<bool, bool> OnCanJumpChanged;
 
     #endregion
 
@@ -948,32 +936,6 @@ public class Humanoid : MonoBehaviour
     }
 
     /// <summary>
-    /// Setting Humanoid's access to move
-    /// </summary>
-    /// <param name="enable">True/False</param>
-    public void SetHumanoidCanMove(bool enable)
-    {
-        bool old = canMove;
-        canMove = enable;
-
-        if (old != canMove)
-            OnCanMoveChanged?.Invoke(old, enable);
-    }
-
-    /// <summary>
-    /// Setting Humanoid's access to jump
-    /// </summary>
-    /// <param name="enable">True/False</param>
-    public void SetHumanoidCanJump(bool enable)
-    {
-        bool old = canJump;
-        canJump = enable;
-
-        if (old != canJump)
-            OnCanJumpChanged?.Invoke(old, enable);
-    }
-
-    /// <summary>
     /// Setting Humanoid's WalkToStoppingDistance, that used for Humanoid minimum distance to stop of MoveTo() or HumanoidMotor
     /// </summary>
     /// <param name="amount">Amount must be >=0</param>
@@ -1359,8 +1321,6 @@ public class Humanoid : MonoBehaviour
 
         OnCanApplyFallDamageChanged = null;
         OnPlatformStandingChanged = null;
-        OnCanMoveChanged = null;
-        OnCanJumpChanged = null;
     }
     #endregion
 
