@@ -20,6 +20,37 @@ using System;
 using UnityEngine;
 
 /// <summary>
+/// Locomotion type of Motor of Humanoid
+/// </summary>
+public enum MotorLocomotion
+{
+    /// <summary>
+    /// Locomotion type where Humanoid is moving by the direction of vector
+    /// </summary>
+    Move = 1,
+    /// <summary>
+    /// Locomotion type where Humanoid is moving upwards that affected by physics
+    /// </summary>
+    Jump = 2,
+    /// <summary>
+    /// Locomotion type where Humanoid's collider is in half of its collider/standing size
+    /// </summary>
+    Crouch = 4,
+    /// <summary>
+    /// Locomotion type where Humanoid's collider is in half of its crouch size
+    /// </summary>
+    Prone = 8,
+    /// <summary>
+    /// Locomotion type where Humanoid is moving quickly in ease by the direction of vector
+    /// </summary>
+    Dash = 16,
+    /// <summary>
+    /// Locomotion type where Humanoid is able to stepping up on the obstacles
+    /// </summary>
+    SteppingUp = 32
+};
+
+/// <summary>
 /// HumanoidMotor's module script, as the locomotive structure of this Humanoid or transform based with physics
 /// </summary>
 [Serializable, RequireComponent(typeof(Humanoid)), RequireComponent(typeof(Rigidbody)), RequireComponent(typeof(Collider))]
@@ -206,6 +237,8 @@ public class HumanoidMotor : MonoBehaviour
     private bool canDash;
     private bool canStepUp;
 
+    private MotorLocomotion _allowedLocomotions;
+
     #endregion
 
     #region Events
@@ -336,6 +369,24 @@ public class HumanoidMotor : MonoBehaviour
     #endregion
 
     #region APIs
+
+    /// <summary>
+    /// Enabling the locomotion(s) type of Motor
+    /// </summary>
+    /// <param name="Locomotions"></param>
+    public void EnableLocomotions(MotorLocomotion Locomotions)
+    {
+        _allowedLocomotions |= Locomotions;
+    }
+
+    /// <summary>
+    /// Disabling the locomotion(s) type of Motor
+    /// </summary>
+    /// <param name="Locomotions"></param>
+    public void DisableLocomotions(MotorLocomotion Locomotions)
+    {
+        _allowedLocomotions &= ~Locomotions;
+    }
 
     /// <summary>
     /// Moving the Humanoid with desired or target direction from the world space, based to Unity's physics from Humanoid
@@ -663,6 +714,11 @@ public class HumanoidMotor : MonoBehaviour
     #endregion
 
     #region InternalHelpers
+
+    private bool IsLocomotionAllowed(MotorLocomotion __locomotion)
+    {
+        return (_allowedLocomotions & __locomotion) != 0;
+    }
 
     private float GetT(float speed, float multiplier)
     {
@@ -1362,17 +1418,18 @@ public class HumanoidMotor : MonoBehaviour
     }
 
     private void HandleFallTracking()
-    {
+    {                    
         if (!isGrounded)
         {
+            if (!jumpAffectsFall && humanoid.StateType == HumanoidStateType.Jumping) return;
+
             if (rigidBody.linearVelocity.y > floatingVelocity)
             {
                 if (humanoid.StateType != HumanoidStateType.Airborne && humanoid.StateType != HumanoidStateType.FreeFalling)
                 {
-                    if (!jumpAffectsFall && humanoid.StateType == HumanoidStateType.Jumping) return;
-
                     fallStartY = rootPart.position.y;
-                    humanoid.ChangeState(HumanoidStateType.Airborne);
+                    if (!(isSliding && humanoid.StateType == HumanoidStateType.Sliding))
+                        humanoid.ChangeState(HumanoidStateType.Airborne);
 
                     isGrounded = false;
                     OnAirborneBegin?.Invoke();
@@ -1381,9 +1438,9 @@ public class HumanoidMotor : MonoBehaviour
                 fallStartY = Mathf.Max(fallStartY, rootPart.position.y);
                 OnAirborne?.Invoke();
             }
-
-            if (rigidBody.linearVelocity.y < -floatingVelocity)
+            else if (rigidBody.linearVelocity.y < -floatingVelocity)
             {
+
                 if (humanoid.StateType != HumanoidStateType.FreeFalling)
                 {
                     humanoid.ChangeState(HumanoidStateType.FreeFalling);
@@ -1399,7 +1456,8 @@ public class HumanoidMotor : MonoBehaviour
             if (humanoid.StateType == HumanoidStateType.FreeFalling)
             {
                 ApplyFallDamage();
-                humanoid.ChangeState(HumanoidStateType.Grounded);
+                if (humanoid.IsAlive || humanoid.StateType != HumanoidStateType.Died)
+                    humanoid.ChangeState(HumanoidStateType.Grounded);
 
                 isGrounded = true;
 
@@ -1890,30 +1948,32 @@ public class HumanoidMotor : MonoBehaviour
 
     private void UpdatePermissionRuntime()
     {
-        canMove = humanoid.CanMove && 
+        canMove = IsLocomotionAllowed(MotorLocomotion.Move) && 
             humanoid.IsAlive &&
             !humanoid.PlatformStanding && 
             _movementLockCount <= 0;
         
-        canJump = humanoid.CanJump &&
+        canJump = IsLocomotionAllowed(MotorLocomotion.Jump) &&
             humanoid.IsAlive &&
             !humanoid.PlatformStanding &&
             humanoid.StateType != HumanoidStateType.Crouch &&
             humanoid.StateType != HumanoidStateType.Prone &&
+            humanoid.StateType != HumanoidStateType.Sliding &&
             humanoid.StateType != HumanoidStateType.Lunging &&
             _jumpLockCount <= 0;
 
-        canCrouch = humanoid.CanCrouch && humanoid.StateType != HumanoidStateType.Crouch && CanUsePoseInput();
+        canCrouch = IsLocomotionAllowed(MotorLocomotion.Crouch) && humanoid.StateType != HumanoidStateType.Crouch && CanUsePoseInput();
 
-        canProne = humanoid.CanProne && humanoid.StateType != HumanoidStateType.Prone && CanUsePoseInput();
+        canProne = IsLocomotionAllowed(MotorLocomotion.Prone) && humanoid.StateType != HumanoidStateType.Prone && CanUsePoseInput();
 
-        canDash = humanoid.CanDash &&
+        canDash = IsLocomotionAllowed(MotorLocomotion.Dash) &&
             humanoid.IsAlive &&
             !humanoid.PlatformStanding &&
             humanoid.StateType != HumanoidStateType.Crouch &&
             humanoid.StateType != HumanoidStateType.Prone;
 
-        canStepUp = motorEnabled &&
+        canStepUp = IsLocomotionAllowed(MotorLocomotion.SteppingUp) &&
+             motorEnabled &&
             enableStepUp &&
             humanoid.IsAlive &&
             isGrounded &&
@@ -1953,6 +2013,8 @@ public class HumanoidMotor : MonoBehaviour
         _isDashing = false;
         isCeilingAbove = false;
         isGrounded = false;
+
+        _allowedLocomotions = MotorLocomotion.Move | MotorLocomotion.Jump | MotorLocomotion.SteppingUp;
 
         _idleStayingTimer = Time.time;
     }
