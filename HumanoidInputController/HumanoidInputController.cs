@@ -1,3 +1,5 @@
+// UNFINISHED
+
 /*
 Proposal
 ** HumanoidInputController **
@@ -109,7 +111,7 @@ dll...
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.InputSystem;
+using UnityEngine.Events;
 using UnityEngine.UI;
 
 public class HICAxesTable
@@ -134,7 +136,7 @@ public class HICActionsTable
 
     public HICActionsTable()
     {
-        ActionEntries = new Dictionary<string, HICInputActionEntry>(32);
+        ActionEntries = new Dictionary<string, HICInputActionEntry>(64);
     }  
 };
 
@@ -695,6 +697,18 @@ public class HumanoidInputController : MonoBehaviour
 
     #endregion
 
+    #region AxisCache
+
+    private Dictionary<string, Vector2> _lastVector2Axis2D;
+
+    #endregion
+
+    #region ActionCache
+
+    private Dictionary<Button, UnityAction> _buttonCallbacks;
+
+    #endregion
+
     #region MouseCache
 
     private HICPointerToWorldInfo _projectionInfoCache;
@@ -702,6 +716,7 @@ public class HumanoidInputController : MonoBehaviour
     private Vector2 _mousePos_screen;
     private Vector2 _previous_mousePos_screen;
     private Vector2 _mouseDelta;
+    private float _scroll_mouseDelta;
 
     private bool[] _mouseDown;
     private bool[] _mouseHolding;
@@ -719,7 +734,10 @@ public class HumanoidInputController : MonoBehaviour
     private Vector2 _touchDelta;
 
     private float _touchBeginTime;
+
     private int _touchFingerCounts;
+    private int _touchBeginFrame = -1;
+    private int _touchEndedFrame = -1;
 
     private bool _touchLongPressFired;
     private bool _touchDoubleTapCandidate;
@@ -764,12 +782,15 @@ public class HumanoidInputController : MonoBehaviour
 
     public event Action<HICInputDeviceType, HICInputDeviceType> OnDeviceTypeChanged;
 
+    public event Action<string> OnInputLocked;
+    public event Action<string> OnInputUnlocked;
+
     #endregion
 
     #region Axis
 
     public event Action<string, float, float> OnAxisChanged;
-    public event Action<string, Vector2, Vector2> OnAxis2Changed;
+    public event Action<string, Vector2, Vector2> OnAxis2DChanged;
 
     #endregion
 
@@ -1031,11 +1052,373 @@ public class HumanoidInputController : MonoBehaviour
 
     #endregion
 
+    #region ProjectionGetters
+
+    public Vector2 GetMousePositionInScreen()
+    {
+        return _mousePos_screen;
+    }
+
+    public Vector2 GetMouseDelta()
+    {
+        return _mouseDelta;
+    }
+
+    public float GetMouseScrollDelta()
+    {
+        return _scroll_mouseDelta;
+    }
+
+    public Ray GetMouseRay()
+    {
+        if (currentCamera == null)
+            return new Ray(Vector3.zero, Vector3.forward);
+
+        return currentCamera.ScreenPointToRay(_mousePos_screen);
+    }
+
+    public bool GetMouseHitInWorld(out RaycastHit __hit)
+    {
+        Ray __ray = GetMouseRay();
+
+        return Physics.Raycast(
+            __ray,
+            out __hit,
+            projectionMaxDistance,
+            projectionLayer,
+            QueryTriggerInteraction.Ignore
+        );
+    }
+
+    public HICPointerToWorldInfo GetPointerToWorldInfo()
+    {
+        return _projectionInfoCache;
+    }
+
+    public Vector3 GetMousePositionInWorld()
+    {
+        return GetPointerToWorldInfo().WorldPosition;
+    }
+
+    public Vector3 GetMouseInWorldPoint(float __distanceFromCamera)
+    {
+        if (currentCamera == null)
+            return Vector3.zero;
+
+        Ray __ray = GetMouseRay();
+        return __ray.GetPoint(__distanceFromCamera);
+    }
+
+    public Vector3 GetMouseWorldPointOnPlane(Plane __plane)
+    {
+        Ray __ray = GetMouseRay();
+
+        if (__plane.Raycast(__ray, out float __dist))
+            return __ray.GetPoint(__dist);
+
+        return Vector3.zero;
+    }
+
+    #endregion
+
+    #region Actions
+
+    public void BindAction(string __actionName, Action<HICInputActionContext> __callback, Button __uiButton, params HICInputActionParams[] __params)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+        {
+            __entry = new HICInputActionEntry(__actionName);
+            _actionsTable.ActionEntries.Add(__actionName, __entry);
+        }
+
+        __entry.Callbacks = __callback;
+        __entry.UIButton = __uiButton;
+
+        __entry.Bindings.Clear();
+
+        if (__params != null)
+        {
+            foreach (var __param in __params)
+            {
+                __entry.Bindings.Add(__param);
+                AddWatchedActionKey(__param);
+            }
+        }
+
+        BindUIButtonCallback(__entry);
+    }
+
+    public void UnbindAction(string __actionName)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return;
+
+        UnbindUIButtonCallback(__entry);
+
+        __entry.Bindings.Clear();
+        _actionsTable.ActionEntries.Remove(__actionName);
+
+        RefreshWatchedKeys();
+    }
+
+    public bool GetActionDown(string __actionName)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return false;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return false;
+
+        return __entry.State.PerformedThisFrame && !__entry.State.Consumed;
+    }
+
+    public bool GetAction(string __actionName)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return false;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return false;
+
+        return __entry.State.IsHolding && !__entry.State.Consumed;
+    }
+
+    public bool GetActionUp(string __actionName)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return false;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return false;
+
+        return __entry.State.ReleasedThisFrame && !__entry.State.Consumed;
+    }
+
+    public float GetActionHoldingDuration(string __actionName)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return 0f;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return 0f;
+
+        return __entry.State.HoldingDuration; 
+    }  
+
+    #endregion
+
+    #region Locker
+
+    public void LockInput(string __reason = "DeathCoroutine")
+    {
+        if (string.IsNullOrEmpty(__reason)) return;
+
+        if (_inputLocks.Add(__reason))
+            OnInputLocked?.Invoke(__reason);
+    }
+
+    public void UnlockInput(string __reason = "RevivedCoroutine")
+    {
+        if (string.IsNullOrEmpty(__reason)) return;
+
+        if (_inputLocks.Remove(__reason))
+            OnInputUnlocked?.Invoke(__reason);
+    }
+
+    public void ClearLocks()
+    {
+        _inputLocks.Clear();
+    }
+
+    public bool IsInputLocked()
+    {
+        return _inputLocks.Count > 0;
+    }
+    
+    public bool IsInputLockedWithReason(string __reason)
+    {
+        if (string.IsNullOrEmpty(__reason)) return false;
+
+        return _inputLocks.Contains(__reason);
+    }
+
+    #endregion
+
+    #region Buffers
+
+    public void SetActionBuffer(string __actionName, float __bufferTime)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return;
+
+        __entry.BufferTime = Mathf.Max(0f, __bufferTime);
+    }
+
+    public bool WasActionBuffered(string __actionName)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return false;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return false;
+
+        if (!__entry.State.Buffered)
+            return false;
+
+        float __elapsed = Time.time - __entry.State.LastPerformedTime;
+        return __elapsed <= __entry.BufferTime;
+    }
+
+    public void ConsumeActionBuffer(string __actionName)
+    {
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return;
+
+        __entry.State.Buffered = false;
+    }
+
+    #endregion
+
+    #region ActionConsumes
+
+    public void ConsumeAction(string __actionName)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return;
+
+        __entry.State.Consumed = true;
+    }
+
+    public void UnConsumeAction(string __actionName)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return;
+
+        __entry.State.Consumed = false;
+    }
+
+    public bool IsActionConsumed(string __actionName)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return false;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return false;
+
+        return __entry.State.Consumed;
+    }
+
+    public void ClearAllConsumedActions()
+    {
+        foreach (var __pair in _actionsTable.ActionEntries)
+        {
+            HICInputActionState __state = __pair.Value.State;
+            __state.Consumed = false;
+        }
+    }
+
+    #endregion
+
+    #region InputContexts
+
+    public void PushInputContext(string __inputContext)
+    {
+        if (string.IsNullOrEmpty(__inputContext)) return;
+
+        _inputContexts.Push(__inputContext);
+    }
+
+    public void PopInputContext(string __inputContext)
+    {
+        if (string.IsNullOrEmpty(__inputContext)) return;
+
+        if (_inputContexts.Count <= 0) return;
+
+        _inputContexts.Pop();
+    }
+
+    public bool IsThisCurrentInputContext(string __inputContext)
+    {
+        if (string.IsNullOrEmpty(__inputContext)) return false;
+
+        if (_inputContexts.Count <= 0) return false;
+
+        return _inputContexts.Peek() == __inputContext;
+    }
+
+    public string GetCurrentInputContext()
+    {
+        if (_inputContexts.Count <= 0) return string.Empty;
+
+        return _inputContexts.Peek();
+    }
+
+    #endregion
+
     #endregion
 
     #region Helpers
 
     #region KeysCache
+
+    private void UnbindUIButtonCallback(HICInputActionEntry __entry)
+    {
+        if (__entry.UIButton == null) return;
+
+        if (!_buttonCallbacks.TryGetValue(__entry.UIButton, out var __action))
+            return;
+
+        __entry.UIButton.onClick.RemoveListener(__action);
+        _buttonCallbacks.Remove(__entry.UIButton);
+    }
+
+    private void BindUIButtonCallback(HICInputActionEntry __entry)
+    {
+        if (__entry.UIButton == null) return;
+
+        UnbindUIButtonCallback(__entry);
+
+        UnityAction __action = () =>
+        {
+            if (IsInputLocked())
+                return;
+
+            HICInputActionParams __params = new HICInputActionParams
+            {
+                DeviceType = HICInputDeviceType.UI,
+                TriggerType = HICInputTriggerType.Down,
+
+                Key = KeyCode.None,
+
+                GamepadButtonIndex = -1,
+                MouseButton = -1,
+                TouchFingersIndex = -1,
+
+                HoldingTime = 0f,
+            };
+
+
+        };
+
+        __entry.UIButton.onClick.AddListener(__action);
+        _buttonCallbacks.Add(__entry.UIButton, __action);
+    }
+
+    private void AddWatchedActionKey(HICInputActionParams __param)
+    {
+        AddWatchedKey(__param.Key);
+        AddWatchedKey(__param.KeyCombo);
+
+        if (__param.SequenceKeys != null)
+        {
+            for (int i = 0; i < __param.SequenceKeys.Length; i++)
+                AddWatchedKey(__param.SequenceKeys[i]); 
+        }
+    }
 
     private void AddWatchedKey(KeyCode __key)
     {
@@ -1129,7 +1512,7 @@ public class HumanoidInputController : MonoBehaviour
         foreach (var __action in _actionsTable.ActionEntries)
         {
             HICInputActionEntry __entry = __action.Value;
-            __entry.State.Reset();
+            __entry.State.ResetFrameState();
         }
 
         foreach (var __pair in _axesTable.AxisStatesTable)
@@ -1148,6 +1531,8 @@ public class HumanoidInputController : MonoBehaviour
             _previousUsedDevice = _usedDevice;
         }
     }
+
+    #region Axes
 
     private void HandleAxes()
     {
@@ -1197,7 +1582,429 @@ public class HumanoidInputController : MonoBehaviour
             // update
             _axesTable.AxisStatesTable[__axisName] = __state;
         }
+
+        Internal_UpdateAxis2D();
     }
+
+    private void Internal_UpdateAxis2D()
+    {
+        foreach (var __axis2d in _axesTable.Axis2DInfoTable)
+        {
+            string __vectorName = __axis2d.Key;
+            Vector2 __current = GetAxis2D(__vectorName);
+
+            if (!_lastVector2Axis2D.TryGetValue(__vectorName, out Vector2 __old))
+            {
+                _lastVector2Axis2D.Add(__vectorName, __current);
+                continue;
+            }
+
+            if ((__current - __old).sqrMagnitude > EPSILON)
+            {
+                OnAxis2DChanged?.Invoke(__vectorName, __old, __current);
+                _lastVector2Axis2D[__vectorName] = __current;
+            }
+        }
+    }
+
+    #endregion
+
+    #region Actions
+
+    private void UpdateActions()
+    {
+        if (_actionsTable.ActionEntries.Count <= 0) return;
+
+        foreach (var __pair in _actionsTable.ActionEntries)
+        {
+            HICInputActionEntry __entry = __pair.Value;
+
+            if (!__entry.Enabled)
+                continue;
+
+            if (IsInputLocked())
+            {
+                CancelPerformedAction(__entry);
+                continue;
+            }
+
+            UpdateSingleAction(__entry);
+        }
+    }
+
+    private void UpdateSingleAction(HICInputActionEntry __entry)
+    {
+        for (int i = 0; i < __entry.Bindings.Count; i++)
+        {
+            HICInputActionParams __param = __entry.Bindings[i];
+
+            HandleActionTrigger(__entry, __param);
+
+            if (__entry.State.PerformedThisFrame)
+                break;
+        }
+
+
+    }
+
+    private void HandleActionTrigger(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        switch (__param.TriggerType)
+        {
+            case HICInputTriggerType.Down:
+                Input_HandleAction_Down(__entry, __param);
+                break;
+                
+            case HICInputTriggerType.Hold:
+                Input_HandleAction_Hold(__entry, __param);
+                break;
+            
+            case HICInputTriggerType.Up:
+                Input_HandleAction_Up(__entry, __param);
+                break;
+
+            case HICInputTriggerType.Tap:
+                Input_HandleAction_Tap(__entry, __param);
+                break;
+
+            case HICInputTriggerType.DoubleTap:
+                Input_HandleAction_DoubleTap(__entry, __param);
+                break;
+
+            case HICInputTriggerType.LongPressing:
+                Input_HandleAction_LongPressing(__entry, __param);
+                break;
+
+            case HICInputTriggerType.Combo:
+                Input_HandleAction_Combo(__entry, __param);
+                break;
+
+            case HICInputTriggerType.Toggle:
+                Input_HandleAction_Toggle(__entry, __param);
+                break;
+
+            case HICInputTriggerType.Special:
+                Input_HandleAction_Special(__entry, __param);
+                break;
+        }
+    }
+
+    private void Input_HandleAction_Down(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        if (!IsActionBindingDown(__param)) return;
+
+        ReadyPerformAction(__entry, __param);
+        PerformingAction(__entry, __param);
+    }
+
+    private void Input_HandleAction_Hold(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        if (IsActionBindingDown(__param))
+            ReadyPerformAction(__entry, __param);
+
+        if (IsActionBindingHolding(__param))
+        {
+            __entry.State.IsHolding = true;
+            __entry.State.HoldingDuration = Time.time - __entry.State.BeginTime;
+
+            if (__entry.State.HoldingDuration >= __param.HoldingTime)
+                PerformingAction(__entry, __param);
+        }
+
+        if (IsActionBindingUp(__param))
+            ReleasePerformedAction(__entry, __param);
+    }
+
+    private void Input_HandleAction_Up(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        if (!IsActionBindingUp(__param)) return;
+
+        ReleasePerformedAction(__entry, __param);
+        PerformingAction(__entry, __param);
+    }
+
+    private void Input_HandleAction_Tap(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        if (IsActionBindingDown(__param))
+            ReadyPerformAction(__entry, __param);
+
+        if (IsActionBindingUp(__param))
+        {
+            if (Time.time - __entry.State.BeginTime <= __param.TapMaxTime)
+                PerformingAction(__entry, __param);
+
+            ReleasePerformedAction(__entry, __param);
+        }
+    }
+
+    private void Input_HandleAction_DoubleTap(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        if (!IsActionBindingDown(__param)) return;
+
+        float __now = Time.time;
+        float __delta = __now - __entry.State.LastTapTime;
+
+        if (__param.DoubleTapMaxDelay >= __delta)
+        {
+            __entry.State.TapCounts++;
+
+            if (__entry.State.TapCounts >= 2)
+            {
+                PerformingAction(__entry, __param);
+                __entry.State.TapCounts = 0;
+            }
+        }
+        else
+        {
+            __entry.State.TapCounts = 1;
+        }
+
+        __entry.State.LastTapTime = __now;
+    }
+
+    private void Input_HandleAction_LongPressing(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        if (IsActionBindingDown(__param))
+            ReadyPerformAction(__entry, __param);
+
+        if (IsActionBindingHolding(__param))
+        {
+            __entry.State.IsHolding = true;
+            __entry.State.HoldingDuration = Time.time - __entry.State.BeginTime;
+
+            if (__entry.State.HoldingDuration >= __param.HoldingTime && !__entry.State.PerformedThisFrame)
+                PerformingAction(__entry, __param);
+        }
+
+        if (IsActionBindingUp(__param))
+            ReleasePerformedAction(__entry, __param);
+    }
+
+    private void Input_HandleAction_Combo(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        bool __sequenceKeyPressed = __param.KeyCombo == KeyCode.None || IsInputHolding(__param.KeyCombo);
+
+        if (!__sequenceKeyPressed) return;
+
+        if (IsActionBindingDown(__param))
+        {
+            ReadyPerformAction(__entry, __param);
+            PerformingAction(__entry, __param);
+        }
+    }
+
+    private void Input_HandleAction_Toggle(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        if (!IsActionBindingDown(__param)) return;
+
+        __entry.State.Toggled = !__entry.State.Toggled;
+
+        ReadyPerformAction(__entry, __param);
+        PerformingAction(__entry, __param);
+    }
+
+    private void Input_HandleAction_Special(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        if (__param.SequenceKeys == null || __param.SequenceKeys.Length <= 0)
+            return;
+
+        int __index = __entry.State.SequenceIndex;
+        KeyCode __expectedKey = __param.SequenceKeys[__index];
+
+        if (IsInputDown(__expectedKey))
+        {
+            __entry.State.SequenceIndex++;
+
+            if (__entry.State.SequenceIndex >= __param.SequenceKeys.Length)
+            {
+                PerformingAction(__entry, __param);
+                __entry.State.SequenceIndex = 0;
+            }
+
+            return;
+        }
+
+        // happened when a key accidentally/in-purpose clicked, resetting the sequence (special) keys
+        for (int __i = 0; __i < _watchedButtons.Count; __i++)
+        {
+            KeyCode __susKey = _watchedButtons[__i];
+
+            if (__susKey != __expectedKey && IsInputDown(__susKey))
+            {
+                __entry.State.SequenceIndex = 0;
+                return;
+            }
+        }
+    }
+
+    #region ActionHelpers
+
+    private bool IsActionBindingDown(HICInputActionParams __param)
+    {
+        switch (__param.DeviceType)
+        {
+            case HICInputDeviceType.Keyboard:
+                return IsInputDown(__param.Key);
+
+            case HICInputDeviceType.Mouse:
+                return __param.MouseButton >= 0 && __param.MouseButton < _mouseDown.Length && _mouseDown[__param.MouseButton];
+
+            case HICInputDeviceType.Gamepad:
+                return IsGamepadDown(__param.GamepadButtonIndex);
+
+            case HICInputDeviceType.Touch:
+                return _touchActive && Time.frameCount == GetBeginTouchFrame();
+
+            default:
+                return false;
+        }
+    }
+
+    private bool IsActionBindingHolding(HICInputActionParams __param)
+    {
+        switch (__param.DeviceType)
+        {
+            case HICInputDeviceType.Keyboard:
+                return IsInputHolding(__param.Key);
+            
+            case HICInputDeviceType.Mouse:
+                return __param.MouseButton >= 0 && __param.MouseButton < _mouseHolding.Length && _mouseHolding[__param.MouseButton];
+
+            case HICInputDeviceType.Gamepad:
+                return IsGamepadHolding(__param.GamepadButtonIndex);
+
+            case HICInputDeviceType.Touch:
+                return _touchActive;
+
+            default:
+                return false;
+        }
+    }
+
+    private bool IsActionBindingUp(HICInputActionParams __param)
+    {
+        switch (__param.DeviceType)
+        {
+            case HICInputDeviceType.Keyboard:
+                return IsInputUp(__param.Key);
+
+            case HICInputDeviceType.Mouse:
+                return __param.MouseButton >= 0 && __param.MouseButton < _mouseUp.Length && _mouseUp[__param.MouseButton];
+
+            case HICInputDeviceType.Gamepad:
+                return IsGamepadUp(__param.GamepadButtonIndex);
+
+            case HICInputDeviceType.Touch:
+                return !_touchActive;
+
+            default:
+                return false;
+        }
+    }
+
+    #endregion
+
+    #region ActionPerforms
+
+    private HICInputActionContext CreateActionContext(HICInputActionEntry __entry, HICInputActionParams __param, HICInputActionStage __stage)
+    {
+        HICInputActionContext __context = new HICInputActionContext(__entry.ActionName, __param.DeviceType, __stage);
+        
+        __context.TriggerType = __param.TriggerType;
+
+        __context.Key = __param.Key;
+        __context.MouseButton = __param.MouseButton;
+        __context.GamepadButtonIndex = __param.GamepadButtonIndex;
+
+        __context.WorldInputPosition = GetMousePositionInWorld();
+        __context.ScreenInputPosition = GetMousePositionInScreen();
+        
+        __context.LastTimePressed = Time.time;
+        __context.HoldingTime = __entry.State.HoldingDuration;
+        __context.Consumed = __entry.State.Consumed;
+
+        return __context;
+    }
+
+    private void ReadyPerformAction(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        __entry.State.IsPressedDown = true;
+        __entry.State.IsHolding = true;
+        __entry.State.BeginTime = Time.time;
+        __entry.State.Stage = HICInputActionStage.Begin;
+        __entry.State.LastDeviceType = __param.DeviceType;
+        __entry.State.LastKey = __param.Key;
+
+        HICInputActionContext __context = CreateActionContext(__entry, __param, HICInputActionStage.Begin);
+
+        OnActionBegin?.Invoke(__context);
+
+        SetCurrentDevice(__param.DeviceType);
+    }
+
+    private void PerformingAction(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        if (__entry.State.Consumed) return;
+
+        __entry.State.PerformedThisFrame = true;
+        __entry.State.LastPerformedTime = Time.time;
+        __entry.State.Buffered = true;
+        __entry.State.Stage = HICInputActionStage.Performed;
+
+        HICInputActionContext __context = CreateActionContext(__entry, __param, HICInputActionStage.Performed);
+
+        __entry.Callbacks?.Invoke(__context);
+        OnActionPerformed?.Invoke(__context);
+
+        if (__entry.ConsumeOnPerformed)
+            __entry.State.Consumed = true;
+    }
+
+    private void ReleasePerformedAction(HICInputActionEntry __entry, HICInputActionParams __param)
+    {
+        __entry.State.IsHolding = false;
+        __entry.State.IsReleasedUp = true;
+        __entry.State.ReleasedThisFrame = true;
+        __entry.State.ReleasedTime = Time.time;
+        __entry.State.HoldingDuration = Time.time - __entry.State.BeginTime;
+        __entry.State.Stage = HICInputActionStage.Released;
+
+        HICInputActionContext __context = CreateActionContext(__entry, __param, HICInputActionStage.Released);
+
+        OnActionReleased?.Invoke(__context);
+    }
+
+    private void CancelPerformedAction(HICInputActionEntry __entry)
+    {
+        if (!__entry.State.IsHolding) return;
+
+        __entry.State.IsHolding = false;
+        __entry.State.Stage = HICInputActionStage.Cancelled;
+
+        HICInputActionContext __context = new HICInputActionContext(__entry.ActionName, __entry.State.LastDeviceType, HICInputActionStage.Cancelled);
+
+        OnActionCancelled?.Invoke(__context);
+    }
+
+    private void UpdateActionHoldingEvent(HICInputActionEntry __entry)
+    {
+        if (__entry.State.IsHolding) return;
+
+        __entry.State.HoldingDuration = Time.time - __entry.State.BeginTime;
+        __entry.State.Stage = HICInputActionStage.Holding;
+
+        HICInputActionContext __context = new HICInputActionContext(__entry.ActionName, __entry.State.LastDeviceType, HICInputActionStage.Holding);
+
+        __context.Key = __entry.State.LastKey;
+        __context.HoldingTime = __entry.State.HoldingDuration;
+        __context.LastTimePressed = Time.time;
+
+        OnActionHolding?.Invoke(__context);
+    }
+
+    #endregion
+
+    #endregion
 
     #endregion
 
@@ -1335,7 +2142,7 @@ public class HumanoidInputController : MonoBehaviour
 
     private bool IsBindingPressed(HICInputAxisInfo __info)
     {
-        if (IsInputHolding(__info.DeviceType, __info.Key))
+        if (IsInputHolding(__info.Key))
             return true;
 
         return false;
@@ -1343,7 +2150,7 @@ public class HumanoidInputController : MonoBehaviour
 
     private bool IsBindingDown(HICInputAxisInfo __info)
     {
-        if (IsInputDown(__info.DeviceType, __info.Key))
+        if (IsInputDown(__info.Key))
             return true;
 
         return false;
@@ -1351,39 +2158,54 @@ public class HumanoidInputController : MonoBehaviour
 
     private bool IsBindingUp(HICInputAxisInfo __info)
     {
-        if (IsInputUp(__info.DeviceType, __info.Key))
+        if (IsInputUp(__info.Key))
             return true;
 
         return false;
     }
 
-    private bool IsInputHolding(HICInputDeviceType __deviceType, KeyCode __key)
+    private bool IsInputHolding(KeyCode __key)
     {
-        bool __isInputValid = (__deviceType == HICInputDeviceType.Keyboard || __deviceType == HICInputDeviceType.Gamepad) && 
-            __key != KeyCode.None && _buttonsHolding.TryGetValue(__key, out bool __result) && __result;
+        bool __isInputValid = __key != KeyCode.None && _buttonsHolding.TryGetValue(__key, out bool __result) && __result;
 
         return __isInputValid;
     }
 
-    private bool IsInputDown(HICInputDeviceType __deviceType, KeyCode __key)
+    private bool IsInputDown(KeyCode __key)
     {
-        bool __isInputValid = (__deviceType == HICInputDeviceType.Keyboard || __deviceType == HICInputDeviceType.Gamepad) &&
-            __key != KeyCode.None && _buttonsDown.TryGetValue(__key, out bool __result) && __result;
+        bool __isInputValid = __key != KeyCode.None && _buttonsDown.TryGetValue(__key, out bool __result) && __result;
 
         return __isInputValid;
     }   
 
-    private bool IsInputUp(HICInputDeviceType __deviceType, KeyCode __key)
+    private bool IsInputUp(KeyCode __key)
     {
-        bool __isInputValid = (__deviceType == HICInputDeviceType.Keyboard || __deviceType == HICInputDeviceType.Gamepad) &&
-            __key != KeyCode.None && _buttonsUp.TryGetValue(__key, out bool __result) && __result;
+        bool __isInputValid = __key != KeyCode.None && _buttonsUp.TryGetValue(__key, out bool __result) && __result;
 
         return __isInputValid;
     }
 
+    private bool IsGamepadDown(int __gamepadIndex)
+    {
+        KeyCode __index = KeyCode.JoystickButton0 + __gamepadIndex;
+        return IsInputDown(__index);
+    }
+
+    private bool IsGamepadHolding(int __gamepadIndex)
+    {
+        KeyCode __index = KeyCode.JoystickButton0 + __gamepadIndex;
+        return IsInputHolding(__index);
+    }
+
+    private bool IsGamepadUp(int __gamepadIndex)
+    {
+        KeyCode __index = KeyCode.JoystickButton0 + __gamepadIndex;
+        return IsInputUp(__index);
+    }
+
     private HICInputDeviceType GetKeyOrGPDevice(KeyCode __key)
     {
-        if (__key >= KeyCode.Joystick1Button0 && __key <= KeyCode.Joystick1Button19 || __key >= KeyCode.Joystick2Button0 && __key <= KeyCode.Joystick2Button19)
+        if (__key >= KeyCode.JoystickButton0 && __key <= KeyCode.JoystickButton19)
             return HICInputDeviceType.Gamepad;
 
         return HICInputDeviceType.Keyboard;
@@ -1391,14 +2213,135 @@ public class HumanoidInputController : MonoBehaviour
 
     private float ResolveCurrentPressedAxis(List<HICInputAxisInfo> __info, KeyCode __key)
     {
-        for (int i = 0; i < __info.Count; i++)
+        for (int __i = 0; __i < __info.Count; __i++)
         {
-            HICInputAxisInfo __bind = __info[i];
+            HICInputAxisInfo __bind = __info[__i];
             if (__bind.Key == __key)
                 return __bind.Value;
         }
 
         return 0f;
+    }
+
+    #endregion
+
+    #region MouseCaches
+    
+    private void UpdateMouseCache()
+    {
+        _previous_mousePos_screen = _mousePos_screen;
+        _mousePos_screen = Input.mousePosition;
+        _mouseDelta = _mousePos_screen - _previous_mousePos_screen;
+
+        _scroll_mouseDelta = Input.mouseScrollDelta.y;
+
+        for (int __i = 0; __i < 3; __i++)
+        {
+            _mouseDown[__i] = Input.GetMouseButtonDown(__i);
+            _mouseHolding[__i] = Input.GetMouseButton(__i);
+            _mouseUp[__i] = Input.GetMouseButtonUp(__i);
+
+            if (_mouseDown[__i])
+            {
+                SetCurrentDevice(HICInputDeviceType.Mouse);
+                OnMouseDown?.Invoke(__i, _mousePos_screen);
+            }
+
+            if (_mouseHolding[__i])
+            {
+                SetCurrentDevice(HICInputDeviceType.Mouse);
+                OnMouseHolding?.Invoke(__i, _mousePos_screen);
+            }
+
+            if (_mouseUp[__i])
+            {
+                SetCurrentDevice(HICInputDeviceType.Mouse);
+                OnMouseUp?.Invoke(__i, _mousePos_screen);
+            }
+        }
+
+        if (Mathf.Abs(_scroll_mouseDelta) > 0.001f)
+        {
+            SetCurrentDevice(HICInputDeviceType.Mouse);
+            OnMouseScrolling?.Invoke(_scroll_mouseDelta);
+        }
+    }
+
+    public void UpdateMouseProjection()
+    {
+        HICPointerToWorldInfo __pointerInfo = new HICPointerToWorldInfo();
+
+        __pointerInfo.ScreenPosition = _mousePos_screen;
+        __pointerInfo.Ray = GetMouseRay();
+
+        bool __bPointerRay = Physics.Raycast(__pointerInfo.Ray, out RaycastHit __hit, projectionMaxDistance, projectionLayer, QueryTriggerInteraction.Ignore);
+
+        if (__bPointerRay)
+        {
+            __pointerInfo.HasHit = true;
+            __pointerInfo.Hit = __hit;
+            __pointerInfo.WorldPosition = __hit.point;
+            __pointerInfo.Distance = __hit.distance;
+        }
+        else
+        {
+            __pointerInfo.HasHit = false;
+            __pointerInfo.WorldPosition = __pointerInfo.Ray.GetPoint(projectionMaxDistance);
+            __pointerInfo.Distance = projectionMaxDistance;
+        }
+
+        _projectionInfoCache = __pointerInfo;
+    }
+
+    #endregion
+
+    #region TouchCaches
+
+    private int GetBeginTouchFrame()
+    {
+        return _touchBeginFrame;
+    }
+
+    private void UpdateTouchCache()
+    {
+        if (Input.touchCount <= 0)
+        {
+            if (_touchActive)
+                Debug.Log("CONTINUE HERE...");
+
+            _touchFingerCounts = 0;
+            return;
+        }
+
+        Touch touch = Input.GetTouch(0);
+
+        _touchFingerCounts = Input.touchCount;
+        _touchPreviousPos = _touchCurrentPos;
+        _touchCurrentPos = touch.position;
+        _touchDelta = _touchCurrentPos - _touchPreviousPos;
+
+        SetCurrentDevice(HICInputDeviceType.Touch);
+
+        switch (touch.phase)
+        {
+            case TouchPhase.Began:
+                break;
+
+            case TouchPhase.Moved:
+                break;
+
+            case TouchPhase.Canceled:
+                break;
+
+            case TouchPhase.Stationary:
+                break;
+
+            case TouchPhase.Ended:
+                break;
+        }
+
+        if (Input.touchCount >= 2)
+            Debug.Log("CONTINUE HERE....");
     }
 
     #endregion
@@ -1432,6 +2375,10 @@ public class HumanoidInputController : MonoBehaviour
         _inputLocks = new HashSet<string>();
         _inputContexts = new Stack<string>();
 
+        _lastVector2Axis2D = new Dictionary<string, Vector2>(16);
+
+        _buttonCallbacks = new Dictionary<Button, UnityAction>(64);
+
         _usedDevice = HICInputDeviceType.Unknown;
         _previousUsedDevice = HICInputDeviceType.Unknown;
 
@@ -1452,7 +2399,14 @@ public class HumanoidInputController : MonoBehaviour
     {
         FrameBegin();
 
+        UpdateMouseCache();
         UpdateKeyCache();
+        UpdateTouchCache();
+        
+        UpdateActions();
+        HandleAxes();
+
+        UpdateMouseProjection();
 
         FrameEnd();
     }
