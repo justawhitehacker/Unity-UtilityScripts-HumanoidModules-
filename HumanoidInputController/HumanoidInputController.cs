@@ -1,115 +1,7 @@
-// UNFINISHED
-
-/*
-Proposal
-** HumanoidInputController **
-
-Objection:
-HumanoidInputController input; 
-    |--> Independent component from other Humanoid's components
-
-* Methods *
-
-Setter:
-
-(One-time, Start/Awake/etc)
-input.SetAxesTable(axisTable : AxesTableInfo);
-
-(One-time, Start/Awake/etc)
-input.SetActionsTable(actionTable : InputActionsTableInfo)
-
-Axes:
-
-(One-time, Start/Awake/etc)
-input.BindAxis(axisName : string, keycode : KeyCode, value : float)
-    	|--> Inserting new axis into default/internal axes table, or external
-    	|--> table that setted.
-
-(Running)
-input.GetAxis(axisName : string)
-    	|-> Returning float of value, where between [-value, 0, value]. More
-    	|-> smooth and scalable than Input.GetAxis() from Unity.
-
-(Running)
-input.GetProAxis(axisName : string)
-    	|-> Do same as GetAxis() but having more smooth and better rising or 
-    	|-> decreasing value, still same [-value, 0, value].
-
-(One-time, Start/Awake/etc)
-input.UnbindAxis(axisName : string)
-    	|-> Removing the axis info from the axes table of default/internal axes 
-    	|-> table or external table that setted.
-
-Action:
-
-(One-time, Start/Awake/etc)
-input.AddAction(actionName : string, function : (), uiButton : Button, 	keyInfo : 	InputActionInfo...)
-	|-> creating action where happened by input, the keyInfos are args, so 	
-	|-> that can be setted that input like from gamepad, mobile, console, 	
-	|-> VR, etc.
-	|-> table can be from outside or default.
-	|-> uiButton is where a Button UI can trigger this action too, but
-	|-> you can set it to `null` to make no Button triggers action.
-
-(One-time, Start/Awake/etc)
-input.RemoveAction(actionName : string)
-	|-> removing the action from the table
-
-(Running)
-input.InputAction(key : KeyCode, func_whenKeyDown : (), func_whenKeyUp : ())
-	|-> input action where the keycode will call the function based of the key pressed
-	|-> when key just pressed down, func_whenKeyDown will be called. But when the key is unpressed
-	|-> func_whenKeyUp will be called instead.
-
-Projection:
-
-(Running)
-input.GetMousePositionInWorld()
-	|-> returning Vector3 in World-Space of mouse position from screen in world, max distance of
-	|-> mouse from transform can be changed.
-
-input.GetMousePositionInScreen()
-	|-> returning Vector2 in screen of mouse position
-
-dll...
-
-Class-Helpers:
-
-(struct)
-InputActionInfo: berisi informasi KeyCode dan tipe key press nya seperti Down, Up, Holding, dll. Jika Holding, maka metode struct yaitu holdTime harus diisi (default 1 detik). 
-
-dll...
-
-Events:
-
-TouchStarted<Vector2 : touch_pos> -> mobile touching screen begin.
-TouchHold<Vector2 : touch_pos> -> mobile touching the screen in hold.
-TouchPan<Vector2 : touch_pos, float : fingers_count> -> mobile panning the screen with more than one finger.
-TouchEnded<Vector2 : touch_pos> -> mobile touching screen ended.
-TouchInterrupted -> when touching session is interrupted by pop, or something.
-TouchStationary<Vector2 : touch_pos> -> when touching session is still holding but the position haven't changed.
-dll...
-
-MouseDownButton<int : button_type, Vector2 : mouse_clickedPos> -> when button of mouse pressed down and begin.
-MouseScrolling -> when wheel button is scrolling or hovering.
-MouseHolding -> when button of mouse staying to be pressed.
-MouseUpButton<int : button_type, Vector2 : mouse_pos> -> when button of mouse unpressed and ended.
-dll...
-
-InputKeyDown<key : KeyCode> -> happened when any key is pressed down and begin.
-InputKeyStaying<key : KeyCode> -> happened when any key is staying to press the key.
-InputKeyUp<key : KeyCode> -> happened when any key is unpressed and ended.
-dll...
-
-ThumbstickPressDown<int : thumbstickIndex> -> happened when one of the thumbstick is pressed down and begin.
-ThumbstickPressStaying<int : thumbstickIndex> -> happened when one of the thumbsticks is staying to press.
-ThumbstickPressUp<int : thumbstickIndex> -> happened when one of the thumbsticks is unpressed and ended.
-LeftThumbstickRotating -> happened when left thumbstick is rotating after 360* rotation of the thumbstick.
-RightThumbstickRotating -> happened when right thumbstick is rotating after 360* rotation of the thumbstick.
-dll...
-*/
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
@@ -340,8 +232,10 @@ public struct HICAxisParams
         return new HICAxisParams
         {
             Gravity = 18.0f,
+            ProGravity = 18.0f,
             DeadZone = 0.04f,
             Sensitivity = 12.0f,
+            ProSensitivity = 12.0f,
             Snap = true,
             SnapThreshold = 0.01f,
             InvertAxis = false,
@@ -483,7 +377,7 @@ public struct HICInputActionParams
     public KeyCode KeyCombo;
     public KeyCode[] SequenceKeys;
 
-    public HICInputActionParams Keyboard(KeyCode __key, HICInputTriggerType __triggerType = HICInputTriggerType.Down, float __holdTime = 1.0f)
+    public static HICInputActionParams Keyboard(KeyCode __key, HICInputTriggerType __triggerType = HICInputTriggerType.Down, float __holdTime = 1.0f)
     {
         return new HICInputActionParams
         {
@@ -505,7 +399,7 @@ public struct HICInputActionParams
         };
     }
 
-    public HICInputActionParams Mouse(int __mouseButton, HICInputTriggerType __triggerType = HICInputTriggerType.Down, float __holdTime = 1.0f)
+    public static HICInputActionParams Mouse(int __mouseButton, HICInputTriggerType __triggerType = HICInputTriggerType.Down, float __holdTime = 1.0f)
     {
         return new HICInputActionParams
         {
@@ -765,6 +659,13 @@ public class HumanoidInputController : MonoBehaviour
     private Dictionary<KeyCode, bool> _buttonsHolding;
     private Dictionary<KeyCode, bool> _buttonsUp;
     private Dictionary<KeyCode, float> _buttonsPressedTime;
+
+    #endregion
+
+    #region AxisCaches
+
+    private Dictionary<string, HICAxisState> _axisTrackDumps;
+    private Dictionary<string, List<HICInputAxisInfo>> _axisBindTrackDumps;
 
     #endregion
 
@@ -1516,11 +1417,16 @@ public class HumanoidInputController : MonoBehaviour
         }
 
         foreach (var __pair in _axesTable.AxisStatesTable)
+            _axisTrackDumps.Add(__pair.Key, __pair.Value);
+
+        foreach (var __trackPair in _axisTrackDumps)
         {
-            HICAxisState __param = __pair.Value;
-            __param.ChangedThisFrame = false;
-            _axesTable.AxisStatesTable[__pair.Key] = __param;
+            HICAxisState __state = __trackPair.Value;
+            __state.ChangedThisFrame = false;
+            _axesTable.AxisStatesTable[__trackPair.Key] = __state;
         }
+
+        _axisTrackDumps.Clear();
     }
 
     private void FrameEnd()
@@ -1579,6 +1485,7 @@ public class HumanoidInputController : MonoBehaviour
                 OnAxisChanged?.Invoke(__axisName, __oldSmooth, __state.SmoothValue);
             }
 
+            Debug.Log(__state.RawValue);
             // update
             _axesTable.AxisStatesTable[__axisName] = __state;
         }
@@ -2393,6 +2300,9 @@ public class HumanoidInputController : MonoBehaviour
         _buttonsHolding = new Dictionary<KeyCode, bool>(128);
         _buttonsUp = new Dictionary<KeyCode, bool>(128);
         _buttonsPressedTime = new Dictionary<KeyCode, float>(128);
+
+        _axisTrackDumps = new Dictionary<string, HICAxisState>(64);
+        _axisBindTrackDumps = new Dictionary<string, List<HICInputAxisInfo>>(64);
     }
 
     private void Update()
