@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
@@ -30,20 +31,22 @@ public class HICActionsTable
     }  
 };
 
-public class HICInputControlScheme
-{
-    public string SchemeName;
+// coming soon
+// public class HICInputControlScheme
+// {
+//     public string SchemeName;
 
-    public HICAxesTable AxesTable;
-    public HICActionsTable ActionsTable;
+//     public HICAxesTable AxesTable;
+//     public HICActionsTable ActionsTable;
 
-    public HICInputControlScheme(string __schemeName)
-    {
-        SchemeName = __schemeName;
-        AxesTable = new HICAxesTable();
-        ActionsTable = new HICActionsTable();
-    }   
-};
+//     public HICInputControlScheme(string __schemeName)
+//     {
+//         SchemeName = __schemeName;
+//         AxesTable = new HICAxesTable();
+//         ActionsTable = new HICActionsTable();
+//     }   
+// };
+
 /// <summary>
 /// Enumerations of Input stage for HumanoidInputController
 /// </summary>
@@ -418,6 +421,50 @@ public struct HICInputActionParams
             SequenceKeys = null
         };
     }
+
+    public static HICInputActionParams Touch(int __fingerIndex, HICInputTriggerType __triggerType = HICInputTriggerType.Down, float __holdTime = 1.0f)
+    {
+        return new HICInputActionParams
+        {
+            DeviceType = HICInputDeviceType.Touch,
+            TriggerType = __triggerType,
+
+            Key = KeyCode.None,
+
+            GamepadButtonIndex = -1,
+            MouseButton = -1,
+            TouchFingersIndex = __fingerIndex,
+
+            HoldingTime = __holdTime,
+            TapMaxTime = 0.25f,
+            DoubleTapMaxDelay = 0.3f,
+
+            KeyCombo = KeyCode.None,
+            SequenceKeys = null
+        };
+    }
+
+    public static HICInputActionParams Gamepad(int __gamepadButtonIndex, HICInputTriggerType __triggerType = HICInputTriggerType.Down, float __holdTime = 1.0f)
+    {
+        return new HICInputActionParams
+        {
+            DeviceType = HICInputDeviceType.Gamepad,
+            TriggerType = __triggerType,
+
+            Key = KeyCode.None,
+
+            GamepadButtonIndex = __gamepadButtonIndex,
+            MouseButton = -1,
+            TouchFingersIndex = -1,
+
+            HoldingTime = __holdTime,
+            TapMaxTime = 1.0f,
+            DoubleTapMaxDelay = 0.3f,
+
+            KeyCombo = KeyCode.None,
+            SequenceKeys = null   
+        };
+    }
 };
 
 public struct HICInputActionState
@@ -523,11 +570,16 @@ public struct HICInputAxis2Info
     }
 };
 
-public struct HICAxisBindingInterface
+public struct HICFingersIdentity
 {
-    public string AxisName;
-    public KeyCode Key;
-    public float Value;  
+    public int Index;
+    public Vector2 Position;  
+
+    public HICFingersIdentity(int __index, Vector2 __position)
+    {
+        Index = __index;
+        Position = __position;
+    }
 };
 
 public class HumanoidInputController : MonoBehaviour
@@ -540,10 +592,16 @@ public class HumanoidInputController : MonoBehaviour
     [SerializeField] private float projectionMaxDistance = 100.0f;
 
     [Header("Touch")]
-    [SerializeField] private float touchHoldingThreshold = 2.0f;
-    [SerializeField] private float touchTappingMaxTime = 0.35f;
+    [SerializeField] private float touchHoldingDurations = 2.0f;
     [SerializeField] private float touchDoubleTapMaxDelay = 0.35f;
     [SerializeField] private float touchSwipeMinDistance = 50.0f;
+    [SerializeField] private float touchSwipeDuration = 0.75f;
+    [SerializeField] private int touchMaximalOnScreen = 10;
+
+    [Header("Gamepad")]
+    [SerializeField] private float joystickRotationThreshold = 360.0f;
+    [SerializeField] private string leftJoystickAxisName = "JoystickLeft";
+    [SerializeField] private string rightJoystickAxisName = "JoystickRight";
 
     [Header("Details")]
     [SerializeField] private float EPSILON = 0.0001f;
@@ -568,12 +626,12 @@ public class HumanoidInputController : MonoBehaviour
     private bool _isUsingExternalActionsTable;
     #endregion
 
-    #region InputScheme
+    // #region InputScheme
 
-    private Dictionary<string, HICInputControlScheme> _schemes;
-    private string _currentSchemeName;
+    // private Dictionary<string, HICInputControlScheme> _schemes;
+    // private string _currentSchemeName;
 
-    #endregion
+    // #endregion
 
     #region InputLocks
 
@@ -626,6 +684,8 @@ public class HumanoidInputController : MonoBehaviour
     private Vector2 _touchDelta;
 
     private float _touchBeginTime;
+    private float _previousPitchDistance;
+    private float _previousTouchAngle;
 
     private int _touchFingerCounts;
     private int _touchBeginFrame = -1;
@@ -634,6 +694,8 @@ public class HumanoidInputController : MonoBehaviour
     private bool _touchLongPressFired;
     private bool _touchDoubleTapCandidate;
     private float _lastTouchTapTime;
+
+    private List<HICFingersIdentity> _fingersIdentity;
 
     #endregion
 
@@ -644,8 +706,16 @@ public class HumanoidInputController : MonoBehaviour
     private Vector2 _previousLeftStick;
     private Vector2 _previousRightStick;
 
-    private float _leftTrigger;
-    private float _rightTrigger;
+    private bool _leftStickPressed;
+    private bool _rightStickPressed;
+    private bool _previousLeftStickPressed;
+    private bool _previousRightStickPressed;
+
+    private float _leftAccumulatedRotationAngle;
+    private float _rightAccumulatedRotationAngle;
+
+    private float _previousLeftAngle;
+    private float _previousRightAngle;
 
     #endregion
 
@@ -717,7 +787,7 @@ public class HumanoidInputController : MonoBehaviour
     public event Action<Vector2> OnTouchHappened;
 
     public event Action<Vector2, float> OnTouchHolding;
-    public event Action<Vector2, int> OnTouchPan;
+    public event Action<int, HICFingersIdentity[]> OnTouchPan;
 
     public event Action<Vector2> OnTouchReleased;
     public event Action<Vector2> OnTouchStationary;
@@ -1020,6 +1090,40 @@ public class HumanoidInputController : MonoBehaviour
 
     #endregion
 
+    #region Touches
+
+    public bool IsTouchBegin()
+    {
+        return _touchActive && Time.frameCount == GetBeginTouchFrame();
+    }
+
+    public bool IsTouchHolding()
+    {
+        return _touchActive;
+    }
+
+    public bool IsTouchReleased()
+    {
+        return !_touchActive && Time.frameCount == GetEndedTouchFrame();
+    }
+    
+    public int GetBeginTouchFrame()
+    {
+        return _touchBeginFrame;
+    }
+
+    public int GetEndedTouchFrame()
+    {
+        return _touchEndedFrame;
+    }
+
+    public Vector2 GetTouchDelta()
+    {
+        return _touchDelta;
+    }
+
+    #endregion
+
     #region Actions
 
     public void BindAction(string __actionName, Action<HICInputActionContext> __callback, Button __uiButton, params HICInputActionParams[] __params)
@@ -1049,6 +1153,44 @@ public class HumanoidInputController : MonoBehaviour
         BindUIButtonCallback(__entry);
     }
 
+    public bool RebindAction(string __actionName, HICInputActionParams __oldParam, HICInputActionParams __newParam)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return false;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return false;
+
+        for (int i = 0; i < __entry.Bindings.Count; i++)
+        {
+            if (IsSameActionParam(__entry.Bindings[i], __oldParam))
+            {
+                __entry.Bindings[i] = __newParam;
+                AddWatchedActionKey(__newParam);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static bool IsSameActionParam(HICInputActionParams __currParam, HICInputActionParams __comparerParam)
+    {
+        return (
+            __currParam.Key == __comparerParam.Key &&
+            __currParam.KeyCombo == __comparerParam.KeyCombo &&
+            __currParam.TapMaxTime == __comparerParam.TapMaxTime &&
+            __currParam.TouchFingersIndex == __comparerParam.TouchFingersIndex &&
+            __currParam.GamepadButtonIndex == __comparerParam.GamepadButtonIndex &&
+            __currParam.MouseButton == __comparerParam.MouseButton &&
+            __currParam.TriggerType == __comparerParam.TriggerType &&
+            __currParam.DeviceType == __comparerParam.DeviceType &&
+            __currParam.DoubleTapMaxDelay == __comparerParam.DoubleTapMaxDelay &&
+            __currParam.HoldingTime == __comparerParam.HoldingTime &&
+            __currParam.TapMaxTime == __comparerParam.TapMaxTime &&
+            __currParam.SequenceKeys.SequenceEqual(__comparerParam.SequenceKeys)
+        );
+    }
+
     public void UnbindAction(string __actionName)
     {
         if (string.IsNullOrEmpty(__actionName)) return;
@@ -1061,6 +1203,20 @@ public class HumanoidInputController : MonoBehaviour
         __entry.Bindings.Clear();
         _actionsTable.ActionEntries.Remove(__actionName);
 
+        RefreshWatchedKeys();
+    }
+
+    public void ClearActionParams(string __actionName, bool __unbindButton = false)
+    {
+        if (string.IsNullOrEmpty(__actionName)) return;
+
+        if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
+            return;
+
+        if (__unbindButton)
+            UnbindUIButtonCallback(__entry);
+
+        __entry.Bindings.Clear();
         RefreshWatchedKeys();
     }
 
@@ -1800,8 +1956,7 @@ public class HumanoidInputController : MonoBehaviour
                 return IsGamepadUp(__param.GamepadButtonIndex);
 
             case HICInputDeviceType.Touch:
-                return !_touchActive;
-
+                return !_touchActive && Time.frameCount == GetEndedTouchFrame();
             default:
                 return false;
         }
@@ -2061,14 +2216,6 @@ public class HumanoidInputController : MonoBehaviour
         return false;
     }
 
-    private bool IsBindingUp(HICInputAxisInfo __info)
-    {
-        if (IsInputUp(__info.Key))
-            return true;
-
-        return false;
-    }
-
     private bool IsInputHolding(KeyCode __key)
     {
         bool __isInputValid = __key != KeyCode.None && _buttonsHolding.TryGetValue(__key, out bool __result) && __result;
@@ -2202,17 +2349,12 @@ public class HumanoidInputController : MonoBehaviour
 
     #region TouchCaches
 
-    private int GetBeginTouchFrame()
-    {
-        return _touchBeginFrame;
-    }
-
     private void UpdateTouchCache()
     {
         if (Input.touchCount <= 0)
         {
             if (_touchActive)
-                Debug.Log("CONTINUE HERE...");
+                Input_EndedTouch();
 
             _touchFingerCounts = 0;
             return;
@@ -2230,23 +2372,246 @@ public class HumanoidInputController : MonoBehaviour
         switch (touch.phase)
         {
             case TouchPhase.Began:
+                Input_BeginTouch(touch.position);
                 break;
 
             case TouchPhase.Moved:
+                Input_MovedTouch(touch.position);
                 break;
 
             case TouchPhase.Canceled:
+                Input_CancelledTouch();
                 break;
 
             case TouchPhase.Stationary:
+                Input_StationaryTouch(touch.position);
                 break;
 
             case TouchPhase.Ended:
+                Input_EndedTouch();
                 break;
         }
 
         if (Input.touchCount >= 2)
-            Debug.Log("CONTINUE HERE....");
+            CheckMultiFingers();
+    }
+
+    private void Input_BeginTouch(Vector2 __position)
+    {
+        _touchActive = true;
+
+        _touchBeginPos = __position;
+        _touchBeginTime = Time.time;
+        _touchCurrentPos = __position;
+        _touchPreviousPos = __position;
+
+        _touchDelta = Vector2.zero;
+        _touchLongPressFired = false;
+
+        _touchBeginFrame = Time.frameCount;
+
+        OnTouchHappened?.Invoke(__position);
+
+        float __tapSinceBegin = Time.time - _lastTouchTapTime;
+
+        if (touchDoubleTapMaxDelay >= __tapSinceBegin)
+        {
+            OnTouchDoubleTapping?.Invoke(__position);
+            _touchDoubleTapCandidate = true;
+        }
+        else
+        {
+            _touchDoubleTapCandidate = false;
+        }
+
+        _lastTouchTapTime = Time.time;
+    }
+
+    private void Input_MovedTouch(Vector2 __position)
+    {
+        float __holdingDuration = Time.time - _touchBeginTime;
+
+        OnTouchHolding?.Invoke(__position, __holdingDuration);
+
+        if (_touchFingerCounts > 1)
+        {
+            for (int i = 0; i < _touchFingerCounts; i++)
+            {
+                Touch __indexTouch = Input.GetTouch(i);
+                _fingersIdentity.Add(new HICFingersIdentity(__indexTouch.fingerId, __indexTouch.position));
+            }
+            
+            OnTouchPan?.Invoke(_touchFingerCounts, _fingersIdentity.ToArray());
+            _fingersIdentity.Clear();
+        }
+
+        CheckLongPressingTouch(__position, __holdingDuration);
+    }
+
+    private void Input_StationaryTouch(Vector2 __position)
+    {
+        float __holdingDuration = Time.time - _touchBeginTime;
+
+        OnTouchStationary?.Invoke(__position);
+        OnTouchHolding?.Invoke(__position, __holdingDuration);
+
+        CheckLongPressingTouch(__position, __holdingDuration);
+    }
+
+    private void Input_EndedTouch()
+    {
+        if (!_touchActive) return;
+
+        _touchActive = false;
+        _touchEndedFrame = Time.frameCount;
+
+        Vector2 __currentPos = _touchCurrentPos;
+        Vector2 __deltaPos = __currentPos - _touchBeginPos;
+
+        float __swipeDuration = Time.time - _touchBeginTime;
+
+        OnTouchReleased?.Invoke(__currentPos);
+
+        if (__deltaPos.magnitude >= touchSwipeMinDistance && touchSwipeDuration >= __swipeDuration)
+        {
+            Vector2 __direction = __deltaPos.normalized;
+            OnTouchSwipe?.Invoke(_touchBeginPos, __currentPos, __direction);
+        }
+    }
+
+    private void Input_CancelledTouch()
+    {
+        if (!_touchActive) return;
+
+        _touchActive = false;
+        OnTouchInterrupted?.Invoke();
+    }
+
+    private void CheckLongPressingTouch(Vector2 __position, float __holdingDuration)
+    {
+        if (_touchLongPressFired) return;
+
+        if (__holdingDuration < touchHoldingDurations)
+            return;
+
+        _touchLongPressFired = true;
+        OnTouchLongHolding?.Invoke(__position, __holdingDuration);
+    }
+
+    private void CheckMultiFingers()
+    {
+        if (!_touchActive) return;
+
+        if (Input.touchCount < 2)
+            return;
+
+        Touch __firstFinger = Input.GetTouch(0);
+        Touch __secondFinger = Input.GetTouch(0);
+
+        float __currDistance = Vector2.Distance(__firstFinger.position, __secondFinger.position);
+
+        float __zoomDiff = __currDistance - _previousPitchDistance;
+        __zoomDiff = Mathf.Abs(__zoomDiff);
+
+        if (_previousPitchDistance > 0f && __zoomDiff > 0.001f)
+            OnTouchPinch?.Invoke(__zoomDiff, __currDistance);
+
+        _previousPitchDistance = __currDistance;
+        
+        Vector2 __dirr = __secondFinger.position - __firstFinger.position;
+        float __currAngle = Mathf.Atan2(__dirr.y, __dirr.x) * Mathf.Rad2Deg;
+        float __angleDelta = Mathf.DeltaAngle(_previousTouchAngle, __currAngle);
+        __angleDelta = Mathf.Abs(__angleDelta);
+
+        if (__angleDelta > 0.001f)
+            OnTouchRotate?.Invoke(__angleDelta);
+
+        _previousTouchAngle = __currAngle;
+    }
+
+    #endregion
+
+    #region Gamepads
+
+    private void UpdateGamepadCache()
+    {
+        _previousLeftStick = _leftStick;
+        _previousRightStick = _rightStick;
+
+        _leftStick = new Vector2(
+            Input.GetAxisRaw(leftJoystickAxisName + "X"),
+            Input.GetAxisRaw(leftJoystickAxisName + "Y")
+        );
+
+        _rightStick = new Vector2(
+            Input.GetAxisRaw(rightJoystickAxisName + "X"),
+            Input.GetAxisRaw(rightJoystickAxisName + "Y")
+        );
+
+        if ((_leftStick - _previousLeftStick).sqrMagnitude > EPSILON)
+        {
+            SetCurrentDevice(HICInputDeviceType.Gamepad);
+            OnGamepadLeftStickChanged?.Invoke(_leftStick);
+        }
+
+        if ((_rightStick - _previousRightStick).sqrMagnitude > EPSILON)
+        {
+            SetCurrentDevice(HICInputDeviceType.Gamepad);
+            OnGamepadRightStickChanged?.Invoke(_rightStick);
+        }
+
+        Internal_HandleGamepadPressings();
+        Internal_HandleGamepadRotation();
+    }
+
+    private void Internal_HandleGamepadPressings()
+    {
+        _previousLeftStickPressed = _leftStickPressed;
+        _previousRightStickPressed = _rightStickPressed;
+
+        _leftStickPressed = Input.GetKey(KeyCode.JoystickButton8);
+        _rightStickPressed = Input.GetKey(KeyCode.JoystickButton9);
+
+        HandleJoysticksPress(0, _previousLeftStickPressed, _leftStickPressed);
+        HandleJoysticksPress(1, _previousRightStickPressed, _rightStickPressed);
+    }
+
+    private void HandleJoysticksPress(int __index, bool __prev, bool __cur)
+    {
+        if (!__prev && __cur)
+            OnThumbstickPressDown?.Invoke(__index);
+
+        if (__cur)
+            OnThumbstickPressHolding?.Invoke(__index);
+
+        if (__prev && !__cur)
+            OnThumbstickPressUp?.Invoke(__index);
+    }
+
+    private void Internal_HandleGamepadRotation()
+    {
+        HandleJoystickRotation(_leftStick, ref _previousLeftAngle, ref _leftAccumulatedRotationAngle, OnLeftThumbstickRotating);
+
+        HandleJoystickRotation(_rightStick, ref _previousRightAngle, ref _rightAccumulatedRotationAngle, OnRightThumbstickRotating);
+    }
+
+    private void HandleJoystickRotation(Vector2 __stick, ref float __prevAngle, ref float __currAngle, Action __action)
+    {
+        if (__stick.sqrMagnitude < 0.5f * 0.5f)
+            return;
+
+        float __angle = Mathf.Atan2(__stick.y, __stick.x) * Mathf.Rad2Deg;
+        float __angleDelta = Mathf.DeltaAngle(__prevAngle, __angle);
+        __angleDelta = Mathf.Abs(__angleDelta);
+
+        __currAngle += __angleDelta;
+        __prevAngle = __angle;
+
+        if (__currAngle >= joystickRotationThreshold)
+        {
+            __currAngle = 0f;
+            __action?.Invoke();
+        }
     }
 
     #endregion
@@ -2275,7 +2640,7 @@ public class HumanoidInputController : MonoBehaviour
         if (_actionsTable == null)
             _actionsTable = new HICActionsTable();
 
-        _schemes = new Dictionary<string, HICInputControlScheme>(10);
+        // _schemes = new Dictionary<string, HICInputControlScheme>(10);
 
         _inputLocks = new HashSet<string>();
         _inputContexts = new Stack<string>();
@@ -2292,6 +2657,8 @@ public class HumanoidInputController : MonoBehaviour
         _mouseDown = new bool[3];
         _mouseHolding = new bool[3];
         _mouseUp = new bool[3];
+
+        _fingersIdentity = new List<HICFingersIdentity>(touchMaximalOnScreen);
 
         _watchedButtons = new List<KeyCode>(128);
         _buttonsDown = new Dictionary<KeyCode, bool>(128);
@@ -2310,10 +2677,11 @@ public class HumanoidInputController : MonoBehaviour
         UpdateMouseCache();
         UpdateKeyCache();
         UpdateTouchCache();
+        UpdateGamepadCache();
         
         UpdateActions();
-        HandleAxes();
 
+        HandleAxes();
         UpdateMouseProjection();
 
         FrameEnd();
