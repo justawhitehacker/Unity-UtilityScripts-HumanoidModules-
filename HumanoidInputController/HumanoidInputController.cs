@@ -509,9 +509,11 @@ public struct HICInputActionState
     public void ResetFrameState()
     {
         IsPressedDown = false;
-        IsHolding = false;
+        IsReleasedUp = false;
+
         PerformedThisFrame = false;
         ReleasedThisFrame = false;
+
         Stage = HICInputActionStage.None;
     }
 
@@ -634,9 +636,9 @@ public class HumanoidInputController : MonoBehaviour
     private HICAxesTable _axesTable;
     private HICActionsTable _actionsTable;
 
-    /* Private helpers*/
-    private bool _isUsingExternalAxesTable;
-    private bool _isUsingExternalActionsTable;
+    // /* Private helpers*/
+    // private bool _isUsingExternalAxesTable;
+    // private bool _isUsingExternalActionsTable;
     #endregion
 
     // #region InputScheme
@@ -842,7 +844,7 @@ public class HumanoidInputController : MonoBehaviour
         if (__table == null) return;
 
         _axesTable = __table;
-        _isUsingExternalAxesTable = true;
+        // _isUsingExternalAxesTable = true;
     }
 
     public void SetHICActionsTable(HICActionsTable __table)
@@ -850,7 +852,7 @@ public class HumanoidInputController : MonoBehaviour
         if (__table == null) return;
 
         _actionsTable = __table;
-        _isUsingExternalActionsTable = true;
+        // _isUsingExternalActionsTable = true;
 
         RefreshWatchedKeys();
     }
@@ -1637,7 +1639,7 @@ public class HumanoidInputController : MonoBehaviour
             float __snap_th__ = __param.Snap ? __param.SnapThreshold : 0f;
 
             __state.SmoothValue = AxisValueResult(__state.SmoothValue, __target__, __param.Sensitivity, __param.Gravity);
-            __state.ProValue = ProAxisValueResult(__state.ProValue, __target__, __param.ProGravity, __param.ProSensitivity, __snap_th__);
+            __state.ProValue = ProAxisValueResult(__state.ProValue, __target__, __param.ProSensitivity, __param.ProGravity, __snap_th__);
 
             // Debug.Log($"Axis Name: {__axisName} RawValue: {__state.RawValue} Value: {__state.SmoothValue} ProValue: {__state.ProValue}");
 
@@ -1766,10 +1768,24 @@ public class HumanoidInputController : MonoBehaviour
 
     private void Input_HandleAction_Down(HICInputActionEntry __entry, HICInputActionParams __param)
     {
-        if (!IsActionBindingDown(__param)) return;
+        if (IsActionBindingDown(__param))
+        {
+            ReadyPerformAction(__entry, __param);
+            return;
+        }
 
-        ReadyPerformAction(__entry, __param);
-        PerformingAction(__entry, __param);
+        if (IsActionBindingHolding(__param))
+        {
+            __entry.State.IsHolding = true;
+            __entry.State.HoldingDuration = Time.time - __entry.State.BeginTime;
+            return;
+        }
+
+        if (IsActionBindingUp(__param))
+        {
+            ReleasePerformedAction(__entry, __param);
+            return;
+        }
     }
 
     private void Input_HandleAction_Hold(HICInputActionEntry __entry, HICInputActionParams __param)
@@ -1792,10 +1808,8 @@ public class HumanoidInputController : MonoBehaviour
 
     private void Input_HandleAction_Up(HICInputActionEntry __entry, HICInputActionParams __param)
     {
-        if (!IsActionBindingUp(__param)) return;
-
-        ReleasePerformedAction(__entry, __param);
-        PerformingAction(__entry, __param);
+        if (IsActionBindingUp(__param))
+            ReleasePerformedAction(__entry, __param);
     }
 
     private void Input_HandleAction_Tap(HICInputActionEntry __entry, HICInputActionParams __param)
@@ -1862,10 +1876,7 @@ public class HumanoidInputController : MonoBehaviour
         if (!__sequenceKeyPressed) return;
 
         if (IsActionBindingDown(__param))
-        {
             ReadyPerformAction(__entry, __param);
-            PerformingAction(__entry, __param);
-        }
     }
 
     private void Input_HandleAction_Toggle(HICInputActionEntry __entry, HICInputActionParams __param)
@@ -1875,7 +1886,6 @@ public class HumanoidInputController : MonoBehaviour
         __entry.State.Toggled = !__entry.State.Toggled;
 
         ReadyPerformAction(__entry, __param);
-        PerformingAction(__entry, __param);
     }
 
     private void Input_HandleAction_Special(HICInputActionEntry __entry, HICInputActionParams __param)
@@ -2011,6 +2021,7 @@ public class HumanoidInputController : MonoBehaviour
 
         HICInputActionContext __context = CreateActionContext(__entry, __param, HICInputActionStage.Begin);
 
+        __entry.Callbacks?.Invoke(__context);
         OnActionBegin?.Invoke(__context);
 
         SetCurrentDevice(__param.DeviceType);
@@ -2045,6 +2056,7 @@ public class HumanoidInputController : MonoBehaviour
 
         HICInputActionContext __context = CreateActionContext(__entry, __param, HICInputActionStage.Released);
 
+        __entry.Callbacks?.Invoke(__context);
         OnActionReleased?.Invoke(__context);
     }
 
@@ -2057,12 +2069,16 @@ public class HumanoidInputController : MonoBehaviour
 
         HICInputActionContext __context = new HICInputActionContext(__entry.ActionName, __entry.State.LastDeviceType, HICInputActionStage.Cancelled);
 
+        __entry.Callbacks?.Invoke(__context);
         OnActionCancelled?.Invoke(__context);
     }
 
     private void UpdateActionHoldingEvent(HICInputActionEntry __entry)
     {
-        if (__entry.State.IsHolding) return;
+        if (!__entry.State.IsHolding) return;
+
+        if (__entry.State.ReleasedThisFrame) 
+            return;
 
         __entry.State.HoldingDuration = Time.time - __entry.State.BeginTime;
         __entry.State.Stage = HICInputActionStage.Holding;
@@ -2089,6 +2105,8 @@ public class HumanoidInputController : MonoBehaviour
         float __positive = 0;
         float __negative = 0;
 
+        bool __hasPressedKey = false;
+
         InputKey __lastPressedKey = __state.LastPressedKey;
 
         for (int i = 0; i < __bindings.Count; i++)
@@ -2098,7 +2116,9 @@ public class HumanoidInputController : MonoBehaviour
             bool __isPressing = IsBindingPressed(__info);
 
             if (!__isPressing)
-                return 0f;
+                continue;
+
+            __hasPressedKey = true;
 
             float __value = __info.Value;
 
@@ -2115,6 +2135,9 @@ public class HumanoidInputController : MonoBehaviour
 
             SetCurrentDevice(__info.DeviceType);
         }
+
+        if (!__hasPressedKey)
+            return 0f;
 
         bool __hasPositive = __positive != 0f;
         bool __hasNegative = __negative != 0f;
