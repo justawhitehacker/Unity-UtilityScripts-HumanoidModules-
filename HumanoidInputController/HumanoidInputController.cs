@@ -4,6 +4,19 @@ using System.Linq;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
+using UnityEngine.InputSystem.LowLevel;
+
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.EnhancedTouch;
+using NewTouch = UnityEngine.InputSystem.EnhancedTouch.Touch;
+using NewTouchPhase = UnityEngine.InputSystem.TouchPhase;
+using MouseControl = UnityEngine.InputSystem.Controls.ButtonControl;
+
+using InputKey = UnityEngine.InputSystem.Key;
+#elif ENABLE_LEGACY_INPUT_MANAGER
+using InputKey = UnityEngine.KeyCode;
+#endif
 
 public class HICAxesTable
 {
@@ -252,7 +265,7 @@ public struct HICInputActionContext
 {
     public string ActionName;
 
-    public KeyCode Key;
+    public InputKey Key;
     public int MouseButton;
     public int TouchFingersIndex;
     public int GamepadButtonIndex;
@@ -275,7 +288,7 @@ public struct HICInputActionContext
         DeviceType = __deviceType;
         InputStage = __phase;
 
-        Key = KeyCode.None;
+        Key = InputKey.None;
         MouseButton = -1;
         TouchFingersIndex = -1;
         GamepadButtonIndex = -1;
@@ -311,7 +324,7 @@ public struct HICPointerToWorldInfo
 public struct HICInputAxisInfo
 {
     public string AxisName;
-    public KeyCode Key;
+    public InputKey Key;
     public float Value;
     public HICInputDeviceType DeviceType;
 
@@ -319,7 +332,7 @@ public struct HICInputAxisInfo
     public int GamepadAxisIndex;
     public bool IsAnalog;
 
-    public HICInputAxisInfo(string __axisName, KeyCode __key, float __value, HICInputDeviceType __deviceType = HICInputDeviceType.Keyboard)
+    public HICInputAxisInfo(string __axisName, InputKey __key, float __value, HICInputDeviceType __deviceType = HICInputDeviceType.Keyboard)
     {
         AxisName = __axisName;
         Key = __key;
@@ -346,14 +359,14 @@ public struct HICAxisState
     public float LastSmoothValue;
     public float LastProValue;
 
-    public KeyCode LastPressedKey;
+    public InputKey LastPressedKey;
     public float LastChangedTime;
     public bool ChangedThisFrame;
 
     public void Reset() {
         RawValue = 0; SmoothValue = 0; ProValue = 0; TargetValue = 0;
         LastRawValue = 0; LastSmoothValue = 0; LastProValue = 0;
-        LastPressedKey = KeyCode.None; LastChangedTime = 0; ChangedThisFrame = false;
+        LastPressedKey = InputKey.None; LastChangedTime = 0; ChangedThisFrame = false;
     }  
 };
 
@@ -365,7 +378,7 @@ public struct HICInputActionParams
     public HICInputDeviceType DeviceType;
     public HICInputTriggerType TriggerType;
 
-    public KeyCode Key;
+    public InputKey Key;
 
     public int GamepadButtonIndex;
     public int MouseButton;
@@ -375,10 +388,10 @@ public struct HICInputActionParams
     public float TapMaxTime;
     public float DoubleTapMaxDelay;
 
-    public KeyCode KeyCombo;
-    public KeyCode[] SequenceKeys;
+    public InputKey KeyCombo;
+    public InputKey[] SequenceKeys;
 
-    public static HICInputActionParams Keyboard(KeyCode __key, HICInputTriggerType __triggerType = HICInputTriggerType.Down, float __holdTime = 1.0f)
+    public static HICInputActionParams Keyboard(InputKey __key, HICInputTriggerType __triggerType = HICInputTriggerType.Down, float __holdTime = 1.0f)
     {
         return new HICInputActionParams
         {
@@ -395,7 +408,7 @@ public struct HICInputActionParams
             TapMaxTime = 0.25f,
             DoubleTapMaxDelay = 0.3f,
 
-            KeyCombo = KeyCode.None,
+            KeyCombo = InputKey.None,
             SequenceKeys = null
         };
     }
@@ -407,7 +420,7 @@ public struct HICInputActionParams
             DeviceType = HICInputDeviceType.Mouse,
             TriggerType = __triggerType,
 
-            Key = KeyCode.None,
+            Key = InputKey.None,
 
             GamepadButtonIndex = -1,
             MouseButton = __mouseButton,
@@ -417,7 +430,7 @@ public struct HICInputActionParams
             TapMaxTime = 0.25f,
             DoubleTapMaxDelay = 0.3f,
 
-            KeyCombo = KeyCode.None,
+            KeyCombo = InputKey.None,
             SequenceKeys = null
         };
     }
@@ -429,7 +442,7 @@ public struct HICInputActionParams
             DeviceType = HICInputDeviceType.Touch,
             TriggerType = __triggerType,
 
-            Key = KeyCode.None,
+            Key = InputKey.None,
 
             GamepadButtonIndex = -1,
             MouseButton = -1,
@@ -439,7 +452,7 @@ public struct HICInputActionParams
             TapMaxTime = 0.25f,
             DoubleTapMaxDelay = 0.3f,
 
-            KeyCombo = KeyCode.None,
+            KeyCombo = InputKey.None,
             SequenceKeys = null
         };
     }
@@ -451,7 +464,7 @@ public struct HICInputActionParams
             DeviceType = HICInputDeviceType.Gamepad,
             TriggerType = __triggerType,
 
-            Key = KeyCode.None,
+            Key = InputKey.None,
 
             GamepadButtonIndex = __gamepadButtonIndex,
             MouseButton = -1,
@@ -461,7 +474,7 @@ public struct HICInputActionParams
             TapMaxTime = 1.0f,
             DoubleTapMaxDelay = 0.3f,
 
-            KeyCombo = KeyCode.None,
+            KeyCombo = InputKey.None,
             SequenceKeys = null   
         };
     }
@@ -491,7 +504,7 @@ public struct HICInputActionState
 
     public HICInputActionStage Stage;
     public HICInputDeviceType LastDeviceType;
-    public KeyCode LastKey;
+    public InputKey LastKey;
 
     public void ResetFrameState()
     {
@@ -523,7 +536,7 @@ public struct HICInputActionState
         
         Stage = HICInputActionStage.None;
         LastDeviceType = HICInputDeviceType.Unknown;
-        LastKey = KeyCode.None;
+        LastKey = InputKey.None;
     }
 };
 
@@ -721,12 +734,12 @@ public class HumanoidInputController : MonoBehaviour
 
     #region ButtonsCache
 
-    private List<KeyCode> _watchedButtons;
+    private List<InputKey> _watchedButtons;
 
-    private Dictionary<KeyCode, bool> _buttonsDown;
-    private Dictionary<KeyCode, bool> _buttonsHolding;
-    private Dictionary<KeyCode, bool> _buttonsUp;
-    private Dictionary<KeyCode, float> _buttonsPressedTime;
+    private Dictionary<InputKey, bool> _buttonsDown;
+    private Dictionary<InputKey, bool> _buttonsHolding;
+    private Dictionary<InputKey, bool> _buttonsUp;
+    private Dictionary<InputKey, float> _buttonsPressedTime;
 
     #endregion
 
@@ -765,9 +778,9 @@ public class HumanoidInputController : MonoBehaviour
 
     #region Keys
 
-    public event Action<KeyCode> OnInputKeyDown;
-    public event Action<KeyCode> OnInputKeyStaying;
-    public event Action<KeyCode> OnInputKeyUp;
+    public event Action<InputKey> OnInputKeyDown;
+    public event Action<InputKey> OnInputKeyStaying;
+    public event Action<InputKey> OnInputKeyUp;
 
     #endregion
 
@@ -846,7 +859,7 @@ public class HumanoidInputController : MonoBehaviour
 
     #region AxisBinds
 
-    public void BindAxis(string __axisName, KeyCode __key, float __value)
+    public void BindAxis(string __axisName, InputKey __key, float __value)
     {
         if (string.IsNullOrEmpty(__axisName)) return;
 
@@ -898,7 +911,7 @@ public class HumanoidInputController : MonoBehaviour
         _axesTable.AxisStatesTable.Remove(__axisName);
     }
 
-    public void UnbindAxis(string __axisName, KeyCode __key)
+    public void UnbindAxis(string __axisName, InputKey __key)
     {
         if (!_axesTable.AxisBindsTable.TryGetValue(__axisName, out var list))
             return;
@@ -1247,7 +1260,7 @@ public class HumanoidInputController : MonoBehaviour
         if (!_actionsTable.ActionEntries.TryGetValue(__actionName, out var __entry))
             return false;
 
-        return __entry.State.ReleasedThisFrame && !__entry.State.Consumed;
+        return __entry.State.ReleasedThisFrame;
     }
 
     public float GetActionHoldingDuration(string __actionName)
@@ -1447,7 +1460,7 @@ public class HumanoidInputController : MonoBehaviour
                 DeviceType = HICInputDeviceType.UI,
                 TriggerType = HICInputTriggerType.Down,
 
-                Key = KeyCode.None,
+                Key = InputKey.None,
 
                 GamepadButtonIndex = -1,
                 MouseButton = -1,
@@ -1475,9 +1488,9 @@ public class HumanoidInputController : MonoBehaviour
         }
     }
 
-    private void AddWatchedKey(KeyCode __key)
+    private void AddWatchedKey(InputKey __key)
     {
-        if (__key == KeyCode.None)
+        if (__key == InputKey.None)
             return;
 
         if (_buttonsHolding.ContainsKey(__key))
@@ -1626,6 +1639,8 @@ public class HumanoidInputController : MonoBehaviour
             __state.SmoothValue = AxisValueResult(__state.SmoothValue, __target__, __param.Sensitivity, __param.Gravity);
             __state.ProValue = ProAxisValueResult(__state.ProValue, __target__, __param.ProGravity, __param.ProSensitivity, __snap_th__);
 
+            // Debug.Log($"Axis Name: {__axisName} RawValue: {__state.RawValue} Value: {__state.SmoothValue} ProValue: {__state.ProValue}");
+
             __state.ChangedThisFrame =
             (
                 !FuzzyEq(__oldSmooth, __state.SmoothValue) ||
@@ -1639,7 +1654,6 @@ public class HumanoidInputController : MonoBehaviour
                 OnAxisChanged?.Invoke(__axisName, __oldSmooth, __state.SmoothValue);
             }
 
-            Debug.Log(__state.RawValue);
             // update
             _axesTable.AxisStatesTable[__axisName] = __state;
         }
@@ -1705,7 +1719,7 @@ public class HumanoidInputController : MonoBehaviour
                 break;
         }
 
-
+        UpdateActionHoldingEvent(__entry);
     }
 
     private void HandleActionTrigger(HICInputActionEntry __entry, HICInputActionParams __param)
@@ -1843,7 +1857,7 @@ public class HumanoidInputController : MonoBehaviour
 
     private void Input_HandleAction_Combo(HICInputActionEntry __entry, HICInputActionParams __param)
     {
-        bool __sequenceKeyPressed = __param.KeyCombo == KeyCode.None || IsInputHolding(__param.KeyCombo);
+        bool __sequenceKeyPressed = __param.KeyCombo == InputKey.None || IsInputHolding(__param.KeyCombo);
 
         if (!__sequenceKeyPressed) return;
 
@@ -1870,7 +1884,7 @@ public class HumanoidInputController : MonoBehaviour
             return;
 
         int __index = __entry.State.SequenceIndex;
-        KeyCode __expectedKey = __param.SequenceKeys[__index];
+        InputKey __expectedKey = __param.SequenceKeys[__index];
 
         if (IsInputDown(__expectedKey))
         {
@@ -1888,7 +1902,7 @@ public class HumanoidInputController : MonoBehaviour
         // happened when a key accidentally/in-purpose clicked, resetting the sequence (special) keys
         for (int __i = 0; __i < _watchedButtons.Count; __i++)
         {
-            KeyCode __susKey = _watchedButtons[__i];
+            InputKey __susKey = _watchedButtons[__i];
 
             if (__susKey != __expectedKey && IsInputDown(__susKey))
             {
@@ -2075,7 +2089,7 @@ public class HumanoidInputController : MonoBehaviour
         float __positive = 0;
         float __negative = 0;
 
-        KeyCode __lastPressedKey = __state.LastPressedKey;
+        InputKey __lastPressedKey = __state.LastPressedKey;
 
         for (int i = 0; i < __bindings.Count; i++)
         {
@@ -2169,11 +2183,27 @@ public class HumanoidInputController : MonoBehaviour
     {
         for (int i = 0; i < _watchedButtons.Count; i++)
         {
-            KeyCode __current_key = _watchedButtons[i];
+            bool __isKeyDown;
+            bool __isKeyHolding;
+            bool __isKeyUp;
 
-            bool __isKeyDown = Input.GetKeyDown(__current_key);
-            bool __isKeyHolding = Input.GetKey(__current_key);
-            bool __isKeyUp = Input.GetKeyUp(__current_key);
+            #if ENABLE_INPUT_SYSTEM
+
+            InputKey __current_key = _watchedButtons[i];
+            
+            __isKeyDown = Keyboard.current[__current_key].wasPressedThisFrame;
+            __isKeyHolding = Keyboard.current[__current_key].isPressed;
+            __isKeyUp = Keyboard.current[__current_key].wasReleasedThisFrame;
+
+            #elif ENABLE_LEGACY_INPUT_MANAGER
+
+            InputKey __current_key = _watchedButtons[i];
+
+            __isKeyDown = Input.GetKeyDown(__current_key);
+            __isKeyHolding = Input.GetKey(__current_key);
+            __isKeyUp = Input.GetKeyUp(__current_key);
+
+            #endif
 
             _buttonsDown[__current_key] = __isKeyDown;
             _buttonsHolding[__current_key] = __isKeyHolding;
@@ -2182,19 +2212,19 @@ public class HumanoidInputController : MonoBehaviour
             if (__isKeyDown)
             {
                 _buttonsPressedTime[__current_key] = Time.time;
-                SetCurrentDevice(GetKeyOrGPDevice(__current_key));
+                SetCurrentDevice(HICInputDeviceType.Keyboard);
                 OnInputKeyDown?.Invoke(__current_key);
             }
 
             if (__isKeyHolding)
             {
-                SetCurrentDevice(GetKeyOrGPDevice(__current_key));
+                SetCurrentDevice(HICInputDeviceType.Keyboard);
                 OnInputKeyStaying?.Invoke(__current_key);
             }
 
             if (__isKeyUp)
             {
-                SetCurrentDevice(GetKeyOrGPDevice(__current_key));
+                SetCurrentDevice(HICInputDeviceType.Keyboard);
                 OnInputKeyUp?.Invoke(__current_key);
             }
         }
@@ -2216,54 +2246,85 @@ public class HumanoidInputController : MonoBehaviour
         return false;
     }
 
-    private bool IsInputHolding(KeyCode __key)
+    private bool IsInputHolding(InputKey __key)
     {
-        bool __isInputValid = __key != KeyCode.None && _buttonsHolding.TryGetValue(__key, out bool __result) && __result;
+        bool __isInputValid = __key != InputKey.None && _buttonsHolding.TryGetValue(__key, out bool __result) && __result;
 
         return __isInputValid;
     }
 
-    private bool IsInputDown(KeyCode __key)
+    private bool IsInputDown(InputKey __key)
     {
-        bool __isInputValid = __key != KeyCode.None && _buttonsDown.TryGetValue(__key, out bool __result) && __result;
+        bool __isInputValid = __key != InputKey.None && _buttonsDown.TryGetValue(__key, out bool __result) && __result;
 
         return __isInputValid;
     }   
 
-    private bool IsInputUp(KeyCode __key)
+    private bool IsInputUp(InputKey __key)
     {
-        bool __isInputValid = __key != KeyCode.None && _buttonsUp.TryGetValue(__key, out bool __result) && __result;
+        bool __isInputValid = __key != InputKey.None && _buttonsUp.TryGetValue(__key, out bool __result) && __result;
 
         return __isInputValid;
     }
 
     private bool IsGamepadDown(int __gamepadIndex)
     {
-        KeyCode __index = KeyCode.JoystickButton0 + __gamepadIndex;
-        return IsInputDown(__index);
+        #if ENABLE_INPUT_SYSTEM
+        if (Gamepad.current == null) return false;
+        GamepadButton __button = (GamepadButton) 0 + __gamepadIndex;
+        
+        bool __down = Gamepad.current[__button].wasPressedThisFrame;
+
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+        InputKey __index = InputKey.JoystickButton0 + __gamepadIndex;
+
+        bool __down = Input.GetKeyDown(__index);
+        #endif
+
+        SetCurrentDevice(HICInputDeviceType.Gamepad);
+
+        return __down;
     }
 
     private bool IsGamepadHolding(int __gamepadIndex)
     {
-        KeyCode __index = KeyCode.JoystickButton0 + __gamepadIndex;
-        return IsInputHolding(__index);
+        #if ENABLE_INPUT_SYSTEM
+        if (Gamepad.current == null) return false;
+        GamepadButton __button = (GamepadButton) 0 + __gamepadIndex;
+        
+        bool __down = Gamepad.current[__button].isPressed;
+
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+        InputKey __index = InputKey.JoystickButton0 + __gamepadIndex;
+
+        bool __down = Input.GetKey(__index);
+        #endif
+
+        SetCurrentDevice(HICInputDeviceType.Gamepad);
+
+        return __down;
     }
 
     private bool IsGamepadUp(int __gamepadIndex)
     {
-        KeyCode __index = KeyCode.JoystickButton0 + __gamepadIndex;
-        return IsInputUp(__index);
+        #if ENABLE_INPUT_SYSTEM
+        if (Gamepad.current == null) return false;
+        GamepadButton __button = (GamepadButton) 0 + __gamepadIndex;
+        
+        bool __down = Gamepad.current[__button].wasReleasedThisFrame;
+
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+        InputKey __index = InputKey.JoystickButton0 + __gamepadIndex;
+
+        bool __down = Input.GetKeyUp(__index);
+        #endif
+
+        SetCurrentDevice(HICInputDeviceType.Gamepad);
+
+        return __down;
     }
 
-    private HICInputDeviceType GetKeyOrGPDevice(KeyCode __key)
-    {
-        if (__key >= KeyCode.JoystickButton0 && __key <= KeyCode.JoystickButton19)
-            return HICInputDeviceType.Gamepad;
-
-        return HICInputDeviceType.Keyboard;
-    }   
-
-    private float ResolveCurrentPressedAxis(List<HICInputAxisInfo> __info, KeyCode __key)
+    private float ResolveCurrentPressedAxis(List<HICInputAxisInfo> __info, InputKey __key)
     {
         for (int __i = 0; __i < __info.Count; __i++)
         {
@@ -2278,20 +2339,50 @@ public class HumanoidInputController : MonoBehaviour
     #endregion
 
     #region MouseCaches
+
+    private MouseControl NewSystem_Internal_GetMouse(int __index)
+    {
+        return __index switch
+        {
+            0 => Mouse.current.leftButton,
+            1 => Mouse.current.rightButton,
+            2 => Mouse.current.middleButton,
+            3 => Mouse.current.forwardButton,
+            4 => Mouse.current.backButton,
+            _ => null
+        };
+    }
     
     private void UpdateMouseCache()
     {
         _previous_mousePos_screen = _mousePos_screen;
-        _mousePos_screen = Input.mousePosition;
+        #if ENABLE_INPUT_SYSTEM
+            if (Mouse.current == null) return;
+
+            _mousePos_screen = Mouse.current.position.ReadValue();
+            _scroll_mouseDelta = Mouse.current.delta.y.ReadValue();
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+            _mousePos_screen = Input.mousePosition;
+             _scroll_mouseDelta = Input.mouseScrollDelta.y;
+        #endif
         _mouseDelta = _mousePos_screen - _previous_mousePos_screen;
 
-        _scroll_mouseDelta = Input.mouseScrollDelta.y;
 
-        for (int __i = 0; __i < 3; __i++)
+        for (int __i = 0; __i < 5; __i++)
         {
-            _mouseDown[__i] = Input.GetMouseButtonDown(__i);
+            #if ENABLE_INPUT_SYSTEM
+
+            _mouseDown[__i] = NewSystem_Internal_GetMouse(__i).wasPressedThisFrame;
+            _mouseHolding[__i] = NewSystem_Internal_GetMouse(__i).isPressed;
+            _mouseUp[__i] = NewSystem_Internal_GetMouse(__i).wasReleasedThisFrame;
+
+            #elif ENABLE_LEGACY_INPUT_MANAGER
+
+             _mouseDown[__i] = Input.GetMouseButtonDown(__i);
             _mouseHolding[__i] = Input.GetMouseButton(__i);
             _mouseUp[__i] = Input.GetMouseButtonUp(__i);
+
+            #endif
 
             if (_mouseDown[__i])
             {
@@ -2351,6 +2442,54 @@ public class HumanoidInputController : MonoBehaviour
 
     private void UpdateTouchCache()
     {
+        #if ENABLE_INPUT_SYSTEM
+
+        if (NewTouch.activeTouches.Count <= 0)
+        {
+            if (_touchActive)
+                Input_EndedTouch();
+            
+            _touchFingerCounts = 0;
+            return;
+        }
+
+        NewTouch __touch = NewTouch.activeTouches[0];
+
+        _touchFingerCounts = NewTouch.activeTouches.Count;
+        _touchPreviousPos = _touchCurrentPos;
+        _touchCurrentPos = __touch.screenPosition;
+        _touchDelta = _touchCurrentPos - _touchPreviousPos;
+
+        SetCurrentDevice(HICInputDeviceType.Touch);
+
+        switch (__touch.phase)
+        {
+            case NewTouchPhase.Began:
+                Input_BeginTouch(__touch.screenPosition);
+                break;
+            
+            case NewTouchPhase.Moved:
+                Input_MovedTouch(__touch.screenPosition);
+                break;
+
+            case NewTouchPhase.Canceled:
+                Input_CancelledTouch();
+                break;
+
+            case NewTouchPhase.Stationary:
+                Input_StationaryTouch(__touch.screenPosition);
+                break;
+
+            case NewTouchPhase.Ended:
+                Input_EndedTouch();
+                break;
+        }
+
+        if (NewTouch.activeTouches.Count >= 2)
+            CheckMultiFingers();
+
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+
         if (Input.touchCount <= 0)
         {
             if (_touchActive)
@@ -2394,6 +2533,8 @@ public class HumanoidInputController : MonoBehaviour
 
         if (Input.touchCount >= 2)
             CheckMultiFingers();
+
+        #endif
     }
 
     private void Input_BeginTouch(Vector2 __position)
@@ -2433,6 +2574,19 @@ public class HumanoidInputController : MonoBehaviour
 
         OnTouchHolding?.Invoke(__position, __holdingDuration);
 
+        #if ENABLE_INPUT_SYSTEM
+
+        if (_touchFingerCounts > 1)
+        {
+            foreach (var __touch in NewTouch.activeTouches)
+                _fingersIdentity.Add(new HICFingersIdentity(__touch.touchId, __touch.screenPosition));
+
+            OnTouchPan?.Invoke(_touchFingerCounts, _fingersIdentity.ToArray());
+            _fingersIdentity.Clear();
+        }
+
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+
         if (_touchFingerCounts > 1)
         {
             for (int i = 0; i < _touchFingerCounts; i++)
@@ -2444,6 +2598,8 @@ public class HumanoidInputController : MonoBehaviour
             OnTouchPan?.Invoke(_touchFingerCounts, _fingersIdentity.ToArray());
             _fingersIdentity.Clear();
         }
+
+        #endif
 
         CheckLongPressingTouch(__position, __holdingDuration);
     }
@@ -2502,11 +2658,33 @@ public class HumanoidInputController : MonoBehaviour
     {
         if (!_touchActive) return;
 
+        #if ENABLE_INPUT_SYSTEM
+
+        if (NewTouch.activeTouches.Count < 2)
+            return;
+
+        NewTouch __firstFinger = NewTouch.activeTouches[0];
+        NewTouch __secondFinger = NewTouch.activeTouches[1];
+
+        float __currDistance = Vector2.Distance(__firstFinger.screenPosition, __secondFinger.screenPosition);
+
+        float __zoomDiff = __currDistance - _previousPitchDistance;
+        __zoomDiff = Mathf.Abs(__zoomDiff);
+
+        if (_previousPitchDistance > 0f && __zoomDiff > 0.001f)
+            OnTouchPinch?.Invoke(__zoomDiff, __currDistance);
+
+        _previousPitchDistance = __currDistance;
+        
+        Vector2 __dirr = __secondFinger.screenPosition - __firstFinger.screenPosition;
+
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+
         if (Input.touchCount < 2)
             return;
 
         Touch __firstFinger = Input.GetTouch(0);
-        Touch __secondFinger = Input.GetTouch(0);
+        Touch __secondFinger = Input.GetTouch(1);
 
         float __currDistance = Vector2.Distance(__firstFinger.position, __secondFinger.position);
 
@@ -2519,6 +2697,9 @@ public class HumanoidInputController : MonoBehaviour
         _previousPitchDistance = __currDistance;
         
         Vector2 __dirr = __secondFinger.position - __firstFinger.position;
+
+        #endif
+
         float __currAngle = Mathf.Atan2(__dirr.y, __dirr.x) * Mathf.Rad2Deg;
         float __angleDelta = Mathf.DeltaAngle(_previousTouchAngle, __currAngle);
         __angleDelta = Mathf.Abs(__angleDelta);
@@ -2538,6 +2719,15 @@ public class HumanoidInputController : MonoBehaviour
         _previousLeftStick = _leftStick;
         _previousRightStick = _rightStick;
 
+        #if ENABLE_INPUT_SYSTEM
+
+        if (Gamepad.current == null) return;
+
+        _leftStick = Gamepad.current.leftStick.ReadValue();
+        _rightStick = Gamepad.current.rightStick.ReadValue();
+
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+
         _leftStick = new Vector2(
             Input.GetAxisRaw(leftJoystickAxisName + "X"),
             Input.GetAxisRaw(leftJoystickAxisName + "Y")
@@ -2547,6 +2737,8 @@ public class HumanoidInputController : MonoBehaviour
             Input.GetAxisRaw(rightJoystickAxisName + "X"),
             Input.GetAxisRaw(rightJoystickAxisName + "Y")
         );
+
+        #endif
 
         if ((_leftStick - _previousLeftStick).sqrMagnitude > EPSILON)
         {
@@ -2569,8 +2761,17 @@ public class HumanoidInputController : MonoBehaviour
         _previousLeftStickPressed = _leftStickPressed;
         _previousRightStickPressed = _rightStickPressed;
 
+        #if ENABLE_INPUT_SYSTEM
+
+        _leftStickPressed = Gamepad.current.leftStickButton.wasPressedThisFrame;
+        _rightStickPressed = Gamepad.current.rightStickButton.wasPressedThisFrame;
+
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+
         _leftStickPressed = Input.GetKey(KeyCode.JoystickButton8);
         _rightStickPressed = Input.GetKey(KeyCode.JoystickButton9);
+
+        #endif
 
         HandleJoysticksPress(0, _previousLeftStickPressed, _leftStickPressed);
         HandleJoysticksPress(1, _previousRightStickPressed, _rightStickPressed);
@@ -2632,6 +2833,24 @@ public class HumanoidInputController : MonoBehaviour
 
     #region UnityHelpers
 
+    private void OnEnable()
+    {
+        #if ENABLE_INPUT_SYSTEM
+        
+        EnhancedTouchSupport.Enable();
+
+        #endif
+    }
+
+    private void OnDisable()
+    {
+        #if ENABLE_INPUT_SYSTEM
+        
+        EnhancedTouchSupport.Disable();
+
+        #endif
+    }
+
     private void Awake()
     {
         if (_axesTable == null)
@@ -2654,17 +2873,17 @@ public class HumanoidInputController : MonoBehaviour
 
         currentCamera = currentCamera != null ? currentCamera : GetComponent<Camera>();
         
-        _mouseDown = new bool[3];
-        _mouseHolding = new bool[3];
-        _mouseUp = new bool[3];
+        _mouseDown = new bool[5];
+        _mouseHolding = new bool[5];
+        _mouseUp = new bool[5];
 
         _fingersIdentity = new List<HICFingersIdentity>(touchMaximalOnScreen);
 
-        _watchedButtons = new List<KeyCode>(128);
-        _buttonsDown = new Dictionary<KeyCode, bool>(128);
-        _buttonsHolding = new Dictionary<KeyCode, bool>(128);
-        _buttonsUp = new Dictionary<KeyCode, bool>(128);
-        _buttonsPressedTime = new Dictionary<KeyCode, float>(128);
+        _watchedButtons = new List<InputKey>(128);
+        _buttonsDown = new Dictionary<InputKey, bool>(128);
+        _buttonsHolding = new Dictionary<InputKey, bool>(128);
+        _buttonsUp = new Dictionary<InputKey, bool>(128);
+        _buttonsPressedTime = new Dictionary<InputKey, float>(128);
 
         _axisTrackDumps = new Dictionary<string, HICAxisState>(64);
         _axisBindTrackDumps = new Dictionary<string, List<HICInputAxisInfo>>(64);
