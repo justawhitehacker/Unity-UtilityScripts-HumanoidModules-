@@ -14,6 +14,7 @@ using NewTouchPhase = UnityEngine.InputSystem.TouchPhase;
 using MouseControl = UnityEngine.InputSystem.Controls.ButtonControl;
 
 using InputKey = UnityEngine.InputSystem.Key;
+using GyroScope = UnityEngine.InputSystem.Gyroscope;
 #elif ENABLE_LEGACY_INPUT_MANAGER
 using InputKey = UnityEngine.KeyCode;
 #endif
@@ -617,6 +618,22 @@ public class HumanoidInputController : MonoBehaviour
     [SerializeField] private float joystickRotationThreshold = 360.0f;
     [SerializeField] private string leftJoystickAxisName = "JoystickLeft";
     [SerializeField] private string rightJoystickAxisName = "JoystickRight";
+
+    [Header("Gyroscope")]
+    [SerializeField] private bool enableGyroscope = false;
+    [SerializeField] private float gyroSensitivity = 5.0f;
+    [SerializeField] private float gyroDeadZone = 0.01f;
+    [SerializeField] private float gyroSmoothScale = 5.0f;
+    [SerializeField] private float gyroMinRotation = -50.0f;
+    [SerializeField] private float gyroMaxRotation = 50.0f;
+    [SerializeField] private float gyroDriftCorrection = 0.1f;
+    [SerializeField] private bool gyroInvertX = false;
+    [SerializeField] private bool gyroInvertY = false;
+    [SerializeField] private bool gyroInvertZ = false;
+    [SerializeField] private float gyroAxisMultiplier = 0.2f;
+    [SerializeField] private float gyroCalibration = 0.3f;
+    [SerializeField] private float gyroAccelerationCurve = 8.0f;
+    [SerializeField] private float gyroMaxAngularSpeed = 20.0f;
 
     [Header("Details")]
     [SerializeField] private float EPSILON = 0.0001f;
@@ -1783,7 +1800,7 @@ public class HumanoidInputController : MonoBehaviour
 
         if (IsActionBindingUp(__param))
         {
-            ReleasePerformedAction(__entry, __param);
+            ReleasePerformedAction(__entry, __param, false);
             return;
         }
     }
@@ -1791,7 +1808,7 @@ public class HumanoidInputController : MonoBehaviour
     private void Input_HandleAction_Hold(HICInputActionEntry __entry, HICInputActionParams __param)
     {
         if (IsActionBindingDown(__param))
-            ReadyPerformAction(__entry, __param);
+            ReadyPerformAction(__entry, __param, false);
 
         if (IsActionBindingHolding(__param))
         {
@@ -1803,7 +1820,7 @@ public class HumanoidInputController : MonoBehaviour
         }
 
         if (IsActionBindingUp(__param))
-            ReleasePerformedAction(__entry, __param);
+            ReleasePerformedAction(__entry, __param, false);
     }
 
     private void Input_HandleAction_Up(HICInputActionEntry __entry, HICInputActionParams __param)
@@ -1815,14 +1832,14 @@ public class HumanoidInputController : MonoBehaviour
     private void Input_HandleAction_Tap(HICInputActionEntry __entry, HICInputActionParams __param)
     {
         if (IsActionBindingDown(__param))
-            ReadyPerformAction(__entry, __param);
+            ReadyPerformAction(__entry, __param, false);
 
         if (IsActionBindingUp(__param))
         {
             if (Time.time - __entry.State.BeginTime <= __param.TapMaxTime)
                 PerformingAction(__entry, __param);
 
-            ReleasePerformedAction(__entry, __param);
+            ReleasePerformedAction(__entry, __param, false);
         }
     }
 
@@ -1854,7 +1871,7 @@ public class HumanoidInputController : MonoBehaviour
     private void Input_HandleAction_LongPressing(HICInputActionEntry __entry, HICInputActionParams __param)
     {
         if (IsActionBindingDown(__param))
-            ReadyPerformAction(__entry, __param);
+            ReadyPerformAction(__entry, __param, false);
 
         if (IsActionBindingHolding(__param))
         {
@@ -1866,7 +1883,7 @@ public class HumanoidInputController : MonoBehaviour
         }
 
         if (IsActionBindingUp(__param))
-            ReleasePerformedAction(__entry, __param);
+            ReleasePerformedAction(__entry, __param, false);
     }
 
     private void Input_HandleAction_Combo(HICInputActionEntry __entry, HICInputActionParams __param)
@@ -2010,7 +2027,7 @@ public class HumanoidInputController : MonoBehaviour
         return __context;
     }
 
-    private void ReadyPerformAction(HICInputActionEntry __entry, HICInputActionParams __param)
+    private void ReadyPerformAction(HICInputActionEntry __entry, HICInputActionParams __param, bool __call = true)
     {
         __entry.State.IsPressedDown = true;
         __entry.State.IsHolding = true;
@@ -2021,13 +2038,14 @@ public class HumanoidInputController : MonoBehaviour
 
         HICInputActionContext __context = CreateActionContext(__entry, __param, HICInputActionStage.Begin);
 
-        __entry.Callbacks?.Invoke(__context);
+        if (__call)
+            __entry.Callbacks?.Invoke(__context);
         OnActionBegin?.Invoke(__context);
 
         SetCurrentDevice(__param.DeviceType);
     }
 
-    private void PerformingAction(HICInputActionEntry __entry, HICInputActionParams __param)
+    private void PerformingAction(HICInputActionEntry __entry, HICInputActionParams __param, bool __call = true)
     {
         if (__entry.State.Consumed) return;
 
@@ -2038,14 +2056,15 @@ public class HumanoidInputController : MonoBehaviour
 
         HICInputActionContext __context = CreateActionContext(__entry, __param, HICInputActionStage.Performed);
 
-        __entry.Callbacks?.Invoke(__context);
+        if (__call)
+            __entry.Callbacks?.Invoke(__context);
         OnActionPerformed?.Invoke(__context);
 
         if (__entry.ConsumeOnPerformed)
             __entry.State.Consumed = true;
     }
 
-    private void ReleasePerformedAction(HICInputActionEntry __entry, HICInputActionParams __param)
+    private void ReleasePerformedAction(HICInputActionEntry __entry, HICInputActionParams __param, bool __call = true)
     {
         __entry.State.IsHolding = false;
         __entry.State.IsReleasedUp = true;
@@ -2056,7 +2075,8 @@ public class HumanoidInputController : MonoBehaviour
 
         HICInputActionContext __context = CreateActionContext(__entry, __param, HICInputActionStage.Released);
 
-        __entry.Callbacks?.Invoke(__context);
+        if (__call)
+            __entry.Callbacks?.Invoke(__context);
         OnActionReleased?.Invoke(__context);
     }
 
@@ -2116,7 +2136,7 @@ public class HumanoidInputController : MonoBehaviour
             bool __isPressing = IsBindingPressed(__info);
 
             if (!__isPressing)
-                continue;
+                continue; // from "return 0f"
 
             __hasPressedKey = true;
 
@@ -2401,7 +2421,7 @@ public class HumanoidInputController : MonoBehaviour
 
             #elif ENABLE_LEGACY_INPUT_MANAGER
 
-             _mouseDown[__i] = Input.GetMouseButtonDown(__i);
+            _mouseDown[__i] = Input.GetMouseButtonDown(__i);
             _mouseHolding[__i] = Input.GetMouseButton(__i);
             _mouseUp[__i] = Input.GetMouseButtonUp(__i);
 
@@ -2910,6 +2930,22 @@ public class HumanoidInputController : MonoBehaviour
 
         _axisTrackDumps = new Dictionary<string, HICAxisState>(64);
         _axisBindTrackDumps = new Dictionary<string, List<HICInputAxisInfo>>(64);
+    }
+
+    private void Start()
+    {
+        #if ENABLE_INPUT_SYSTEM 
+
+        if (enableGyroscope && GyroScope.current != null)
+            InputSystem.EnableDevice(GyroScope.current);
+        else
+            InputSystem.DisableDevice(GyroScope.current);
+
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+        
+        Input.gyro.enabled = enableGyroscope;
+
+        #endif
     }
 
     private void Update()
