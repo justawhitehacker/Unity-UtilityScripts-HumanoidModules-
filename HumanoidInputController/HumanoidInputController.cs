@@ -543,7 +543,7 @@ public struct HICInputActionState
     }
 };
 
-public class HICInputActionEntry
+public struct HICInputActionEntry
 {
     public string ActionName;
     public float BufferTime;
@@ -598,6 +598,83 @@ public struct HICFingersIdentity
     }
 };
 
+[Flags]
+public enum HICGyroAxis
+{
+    X = 0,
+    Y = 1,
+    Z = 1 << 1,
+    W = 1 << 2
+};
+
+public enum HICGyroType
+{
+    /// <summary>
+    /// When the rotation absolutely relaying by how the rotation of device (as Attitude rotation)
+    /// </summary>
+    Absolute,
+    /// <summary>
+    /// When the rotation is relative by the speed of device's rotation (as AngularVelocity rotation)
+    /// </summary>
+    Relative,
+    /// <summary>
+    /// When the rotation combined with Absolute and Relative
+    /// </summary>
+    Hybird  
+};
+
+public class HICGyroService
+{
+    public Camera CurrentCamera;
+    public ushort CurrentMinusAxis;
+    public HICGyroType CurrentType;
+
+    public Quaternion StartAttitude;
+    public Vector3 StartAngularVelocity;
+
+    public bool Started => __started;
+
+    public float GyroSensitivity;
+    public float GyroDeadZone;
+    public float GyroSmoothScale;
+    public float GyroMinRotationAngle;
+    public float GyroMaxRotationAngle;
+    public float GyroDriftCorrection;
+    public float GyroAxisMultiplier;
+    public float GyroCalibration;
+    public float GyroAccelerationCurve;
+    public float GyroMaxAngularSpeed;
+
+    private bool __started = false;
+
+    public HICGyroService(HICGyroType __gyroType = HICGyroType.Relative, ushort __minusAxis = (ushort) HICGyroAxis.Z | (ushort) HICGyroAxis.W)
+    {
+        CurrentType = __gyroType;
+        CurrentMinusAxis = __minusAxis;
+    }
+
+    public void Start()
+    {
+        __started = true;
+
+        #if ENABLE_INPUT_SYSTEM
+        StartAttitude = AttitudeSensor.current.attitude.ReadValue();
+        StartAngularVelocity = GyroScope.current.angularVelocity.ReadValue();
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+        StartAttitude = Input.gyro.attitude;
+        StartAngularVelocity = Input.gyro.rotationRate;
+        #endif
+    }
+
+    public void Stop()
+    {
+        __started = false;
+
+        StartAttitude = Quaternion.identity;
+        StartAngularVelocity = Vector3.zero;
+    }
+};
+
 public class HumanoidInputController : MonoBehaviour
 {
     #region SerializedPreferences
@@ -627,9 +704,6 @@ public class HumanoidInputController : MonoBehaviour
     [SerializeField] private float gyroMinRotation = -50.0f;
     [SerializeField] private float gyroMaxRotation = 50.0f;
     [SerializeField] private float gyroDriftCorrection = 0.1f;
-    [SerializeField] private bool gyroInvertX = false;
-    [SerializeField] private bool gyroInvertY = false;
-    [SerializeField] private bool gyroInvertZ = false;
     [SerializeField] private float gyroAxisMultiplier = 0.2f;
     [SerializeField] private float gyroCalibration = 0.3f;
     [SerializeField] private float gyroAccelerationCurve = 8.0f;
@@ -847,6 +921,18 @@ public class HumanoidInputController : MonoBehaviour
     public event Action<Vector2> OnGamepadRightStickChanged;
     public event Action<int> OnGamepadConnected;
     public event Action<int> OnGamepadDisconnected;
+
+    #endregion
+
+    #region Gyroscope
+
+    private HICGyroService _gyroService;
+
+    private Quaternion _calibrationQuat = Quaternion.identity;
+    private Quaternion _lastRotatedQuat = Quaternion.identity;
+
+    private Vector3 _calibrationVector3;
+    private Vector3 _lastRotatedVector3;
 
     #endregion
 
@@ -1446,6 +1532,35 @@ public class HumanoidInputController : MonoBehaviour
 
     #endregion
 
+    #region Gyro
+
+    public HICGyroService GyroscopeService(HICGyroType __gyroType = HICGyroType.Relative, ushort __minusAxis = (ushort) HICGyroAxis.Z | (ushort) HICGyroAxis.W)
+    {
+        #if ENABLE_INPUT_SYSTEM
+        if (GyroScope.current == null || AttitudeSensor.current == null) return null;
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+        if (!SystemInfo.supportsGyroscope) return null;
+        #endif
+
+        _gyroService = new HICGyroService(__gyroType, __minusAxis)
+        {
+            CurrentCamera = currentCamera,
+            GyroSensitivity = gyroSensitivity,
+            GyroDeadZone = gyroDeadZone,
+            GyroMinRotationAngle = gyroMinRotation,
+            GyroMaxRotationAngle = gyroMaxRotation,
+            GyroDriftCorrection = gyroDriftCorrection,
+            GyroAxisMultiplier = gyroAxisMultiplier,
+            GyroCalibration = gyroCalibration,
+            GyroAccelerationCurve = gyroAccelerationCurve,
+            GyroMaxAngularSpeed = gyroMaxAngularSpeed,
+        };
+
+        return _gyroService;
+    }
+
+    #endregion
+
     #endregion
 
     #region Helpers
@@ -2009,20 +2124,21 @@ public class HumanoidInputController : MonoBehaviour
 
     private HICInputActionContext CreateActionContext(HICInputActionEntry __entry, HICInputActionParams __param, HICInputActionStage __stage)
     {
-        HICInputActionContext __context = new HICInputActionContext(__entry.ActionName, __param.DeviceType, __stage);
-        
-        __context.TriggerType = __param.TriggerType;
+        HICInputActionContext __context = new HICInputActionContext(__entry.ActionName, __param.DeviceType, __stage)
+        {
+            TriggerType = __param.TriggerType,
 
-        __context.Key = __param.Key;
-        __context.MouseButton = __param.MouseButton;
-        __context.GamepadButtonIndex = __param.GamepadButtonIndex;
+            Key = __param.Key,
+            MouseButton = __param.MouseButton,
+            GamepadButtonIndex = __param.GamepadButtonIndex,
 
-        __context.WorldInputPosition = GetMousePositionInWorld();
-        __context.ScreenInputPosition = GetMousePositionInScreen();
-        
-        __context.LastTimePressed = Time.time;
-        __context.HoldingTime = __entry.State.HoldingDuration;
-        __context.Consumed = __entry.State.Consumed;
+            WorldInputPosition = GetMousePositionInWorld(),
+            ScreenInputPosition = GetMousePositionInScreen(),
+
+            LastTimePressed = Time.time,
+            HoldingTime = __entry.State.HoldingDuration,
+            Consumed = __entry.State.Consumed
+        };
 
         return __context;
     }
@@ -2103,11 +2219,12 @@ public class HumanoidInputController : MonoBehaviour
         __entry.State.HoldingDuration = Time.time - __entry.State.BeginTime;
         __entry.State.Stage = HICInputActionStage.Holding;
 
-        HICInputActionContext __context = new HICInputActionContext(__entry.ActionName, __entry.State.LastDeviceType, HICInputActionStage.Holding);
-
-        __context.Key = __entry.State.LastKey;
-        __context.HoldingTime = __entry.State.HoldingDuration;
-        __context.LastTimePressed = Time.time;
+        HICInputActionContext __context = new HICInputActionContext(__entry.ActionName, __entry.State.LastDeviceType, HICInputActionStage.Holding)
+        {
+            Key = __entry.State.LastKey,
+            HoldingTime = __entry.State.HoldingDuration,
+            LastTimePressed = Time.time
+        };
 
         OnActionHolding?.Invoke(__context);
     }
@@ -2455,10 +2572,11 @@ public class HumanoidInputController : MonoBehaviour
 
     public void UpdateMouseProjection()
     {
-        HICPointerToWorldInfo __pointerInfo = new HICPointerToWorldInfo();
-
-        __pointerInfo.ScreenPosition = _mousePos_screen;
-        __pointerInfo.Ray = GetMouseRay();
+        HICPointerToWorldInfo __pointerInfo = new HICPointerToWorldInfo
+        {
+            ScreenPosition = _mousePos_screen,
+            Ray = GetMouseRay()
+        };
 
         bool __bPointerRay = Physics.Raycast(__pointerInfo.Ray, out RaycastHit __hit, projectionMaxDistance, projectionLayer, QueryTriggerInteraction.Ignore);
 
@@ -2872,6 +2990,197 @@ public class HumanoidInputController : MonoBehaviour
 
     #endregion
 
+    #region GyroCaches
+
+    private Quaternion ConvertRotationResult(Quaternion __currentQuat)
+    {
+        Quaternion __now = __currentQuat;
+        if ((_gyroService.CurrentMinusAxis & (ushort) HICGyroAxis.X) != 0)
+            __now.x = -__now.x;
+
+        if ((_gyroService.CurrentMinusAxis & (ushort) HICGyroAxis.Y) != 0)
+            __now.y = -__now.y;
+
+        if ((_gyroService.CurrentMinusAxis & (ushort) HICGyroAxis.Z) != 0)
+            __now.z = -__now.z;
+
+        if ((_gyroService.CurrentMinusAxis & (ushort) HICGyroAxis.W) != 0)
+            __now.w = -__now.w;
+
+        return __now;
+    }
+
+    private Vector3 ConvertRotationResult(Vector3 __currentVector)
+    {
+        Vector3 __now = __currentVector;
+        if ((_gyroService.CurrentMinusAxis & (ushort) HICGyroAxis.X) != 0)
+            __now.x = -__now.x;
+
+        if ((_gyroService.CurrentMinusAxis & (ushort) HICGyroAxis.Y) != 0)
+            __now.y = -__now.y;
+
+        if ((_gyroService.CurrentMinusAxis & (ushort) HICGyroAxis.Z) != 0)
+            __now.z = -__now.z;
+
+        return __now;
+    }
+
+    private void SetAttitudeCallibration(Quaternion __raw)
+    {
+        __raw = ConvertRotationResult(__raw);
+        _calibrationQuat = __raw;
+    }
+
+    private void SetAngularCalibration(Vector3 __raw)
+    {
+        __raw = ConvertRotationResult(__raw);
+        _calibrationVector3 = __raw;
+    }
+
+    private Quaternion ApplyAttitude(Quaternion __raw)
+    {
+        // inverted/minus axis
+        __raw = ConvertRotationResult(__raw);
+
+        // calibration
+        __raw = _calibrationQuat * __raw;
+
+        // angle-axis out
+        __raw.ToAngleAxis(out float __angle, out Vector3 __axis);
+
+        __angle = __angle > 180.0f ? (__angle - 360.0f) : __angle;
+        float __absAngle = Mathf.Abs(__angle);
+
+        // dead-zone
+        if (__absAngle < _gyroService.GyroDeadZone)
+            return Quaternion.identity;
+
+        // min rotation angle against quat angle
+        if (__absAngle < _gyroService.GyroMinRotationAngle)
+            return Quaternion.identity;
+        
+        float __sign = Mathf.Sign(__angle);
+
+        // sensitivity, accel curve, and max rotation angle against quat angle
+        __angle = Mathf.Pow(__absAngle * _gyroService.GyroSensitivity, _gyroService.GyroAccelerationCurve) * __sign;
+        __angle = Mathf.Clamp(__angle, 0f, _gyroService.GyroMaxRotationAngle);
+
+        // axis multiplier
+        __axis = __axis * _gyroService.GyroAxisMultiplier;
+
+        if (__axis.sqrMagnitude <= EPSILON)
+            return Quaternion.identity;
+        __axis = __axis.normalized;
+
+        // return to quat
+        __raw = Quaternion.AngleAxis(__angle, __axis);
+
+        // slerp checker, smoothscale and driftcorrection
+        __raw = Quaternion.Slerp(_lastRotatedQuat, __raw, _gyroService.GyroSmoothScale);
+        __raw = Quaternion.Slerp(__raw, Quaternion.identity, _gyroService.GyroDriftCorrection);
+
+        // quat attitude cache
+        _lastRotatedQuat = __raw;
+
+        return __raw;
+    }
+
+    private Quaternion ApplyAngularVelocity(Vector3 __raw)
+    {
+        // invert/minus axis and calibration cache
+        __raw = ConvertRotationResult(__raw);
+
+        // calibration
+        __raw = __raw - _calibrationVector3;
+
+        // dead zone
+        __raw = __raw.magnitude >= _gyroService.GyroDeadZone ? __raw :  Vector3.zero;
+        
+        // axis sensitivity and multiplier
+        __raw *= _gyroService.GyroSensitivity * _gyroService.GyroAxisMultiplier;
+        float __speed = __raw.magnitude;
+
+        // accel curve
+        if (__speed > 0)
+        {
+            Vector3 __direction = __raw.normalized;
+            float __curveSpeed = Mathf.Pow(__speed, _gyroService.GyroAccelerationCurve);
+            __raw = __direction * __curveSpeed;
+        }
+
+        // angular speed
+        if (__raw.magnitude > _gyroService.GyroMaxAngularSpeed)
+            __raw = __raw.normalized * _gyroService.GyroMaxAngularSpeed;
+
+        // smooth
+        __raw = Vector3.Lerp(_lastRotatedVector3, __raw, _gyroService.GyroSmoothScale);
+        // last rotated cache
+        _lastRotatedVector3 = __raw;
+
+        // angle
+        float __angle = __raw.magnitude * Time.deltaTime * Mathf.Rad2Deg;
+
+        // min angle
+        if (__angle < _gyroService.GyroMinRotationAngle)
+            return Quaternion.identity;
+
+        // max angle
+        __angle = Mathf.Clamp(__angle, 0f, _gyroService.GyroMaxRotationAngle);
+        // axis
+        Vector3 __axis = __raw.normalized;
+
+        return Quaternion.AngleAxis(__angle, __axis);
+    }
+
+    private void UpdateGyroscope()
+    {
+        if (_gyroService == null || !_gyroService.Started) return;
+
+        SetAttitudeCallibration(_gyroService.StartAttitude);
+        SetAngularCalibration(_gyroService.StartAngularVelocity);
+
+        Quaternion __rotationDelta_Attitude;        
+        Quaternion __rotationDelta_angularVelocity;
+
+        Vector3 __angVel;
+
+        #if ENABLE_INPUT_SYSTEM
+
+        __rotationDelta_Attitude = AttitudeSensor.current != null ? AttitudeSensor.current.attitude.ReadValue() : Quaternion.identity;
+        __angVel = GyroScope.current != null ? GyroScope.current.angularVelocity.ReadValue() : Vector3.zero;
+
+        #elif ENABLE_LEGACY_INPUT_MANAGER
+
+        __rotationDelta_Attitude = Input.gyro.attitude;
+        __angVel = Input.gyro.rotationRate;
+
+        #endif
+
+        __rotationDelta_Attitude = ApplyAttitude(__rotationDelta_Attitude);
+        __rotationDelta_angularVelocity = ApplyAngularVelocity(__angVel);
+
+        Quaternion __final = Quaternion.identity;
+        Transform __cam = _gyroService.CurrentCamera.transform;
+        switch (_gyroService.CurrentType)
+        {
+            case HICGyroType.Absolute:
+                __final = __rotationDelta_Attitude;
+                break;        
+
+            case HICGyroType.Relative:
+                __final = __cam.localRotation * __rotationDelta_angularVelocity;
+                break;        
+
+            case HICGyroType.Hybird:
+                __final = __rotationDelta_Attitude * __rotationDelta_angularVelocity;
+                break;        
+        }
+
+        __cam.localRotation = __final;
+    }
+
+    #endregion
+
     #endregion
 
     #region UnityHelpers
@@ -2937,10 +3246,18 @@ public class HumanoidInputController : MonoBehaviour
         #if ENABLE_INPUT_SYSTEM 
 
         if (enableGyroscope && GyroScope.current != null)
+        {
             InputSystem.EnableDevice(GyroScope.current);
-        else
-            InputSystem.DisableDevice(GyroScope.current);
 
+            if (_gyroService.CurrentType == HICGyroType.Absolute || _gyroService.CurrentType == HICGyroType.Hybird && AttitudeSensor.current != null)
+                InputSystem.EnableDevice(AttitudeSensor.current);
+        }
+        else
+        {
+            InputSystem.DisableDevice(GyroScope.current);
+            InputSystem.DisableDevice(AttitudeSensor.current);
+        }
+        
         #elif ENABLE_LEGACY_INPUT_MANAGER
         
         Input.gyro.enabled = enableGyroscope;
@@ -2956,6 +3273,7 @@ public class HumanoidInputController : MonoBehaviour
         UpdateKeyCache();
         UpdateTouchCache();
         UpdateGamepadCache();
+        UpdateGyroscope();
         
         UpdateActions();
 
